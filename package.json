@@ -1,0 +1,37 @@
+{
+  "name": "arc-auto-organize",
+  "version": "0.1.0",
+  "description": "ARC 경험 자동 정리 엔진 — 산출물 파일을 넣으면 경험 유형을 판별하고 입력 항목에 맞춰 자동으로 정리한다.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./schema": "./dist/schema/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "organize": "tsx src/cli.ts",
+    "test": "tsx test/schema.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.125.0"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.34.0",
+    "pdfjs-dist": "^4.10.38",
+    "mammoth": "^1.9.0",
+    "xlsx": "^0.18.5",
+    "jszip": "^3.10.1",
+    "tesseract.js": "^5.1.1",
+    "node-html-parser": "^6.1.13",
+    "hwp.js": "^0.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": { "node": ">=20" }
+}
