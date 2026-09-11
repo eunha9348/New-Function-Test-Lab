@@ -26,8 +26,8 @@
 Python 단일 파일 포팅본이 `colab/arc_colab.py`에 있습니다. Colab 셀에 이 3줄만 붙여넣으면 됩니다.
 
 ```python
+import os; os.environ["GOOGLE_API_KEY"] = "AIza...여기에_키"   # ← 키만 바꾸세요
 !wget -q -O arc.py https://raw.githubusercontent.com/eunha9348/New-Function-Test-Lab/refs/heads/claude/arc-activity-auto-organize-lu2y8e/colab/arc_colab.py
-import re; src = open('arc.py').read().replace('GOOGLE_API_KEY = ""', 'GOOGLE_API_KEY = "여기에_키"', 1); open('arc.py','w').write(src)
 %run arc.py
 ```
 

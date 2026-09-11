@@ -23,6 +23,10 @@ except ImportError:
     os.system(f"{sys.executable} -m pip install -q requests")
     import requests
 
+# 위 칸을 비워 두고 환경변수로 넣어도 됩니다:  os.environ["GOOGLE_API_KEY"] = "AIza..."
+GOOGLE_API_KEY = (GOOGLE_API_KEY or os.environ.get("GOOGLE_API_KEY", "")).strip()
+GEMINI_MODEL = (GEMINI_MODEL or os.environ.get("GEMINI_MODEL", "")).strip()
+
 API = "https://generativelanguage.googleapis.com/v1beta"
 
 
