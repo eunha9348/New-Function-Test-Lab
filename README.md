@@ -21,6 +21,19 @@
 **엔진은 Google Gemini입니다. Google API 키 하나만 있으면 됩니다.**
 자세한 사용법은 **[USAGE.md](./USAGE.md)** 를 보세요.
 
+## Colab에서 바로 테스트 (설치 없이)
+
+Python 단일 파일 포팅본이 `colab/arc_colab.py`에 있습니다. Colab 셀에 이 3줄만 붙여넣으면 됩니다.
+
+```python
+!wget -q -O arc.py https://raw.githubusercontent.com/eunha9348/New-Function-Test-Lab/refs/heads/claude/arc-activity-auto-organize-lu2y8e/colab/arc_colab.py
+import re; src = open('arc.py').read().replace('GOOGLE_API_KEY = ""', 'GOOGLE_API_KEY = "여기에_키"', 1); open('arc.py','w').write(src)
+%run arc.py
+```
+
+파일 업로드 창이 뜨고, 올리면 유형 판별 → 폼 생성 → 값 채움까지 출력창에 그려집니다.
+API 키 없이 실행하면 스키마·검증기 무결성 자체 점검(20종)만 돌고 끝납니다.
+
 ## 빠른 시작
 
 ```bash
