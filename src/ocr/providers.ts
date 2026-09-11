@@ -1,7 +1,6 @@
-import type Anthropic from "@anthropic-ai/sdk";
-import { API_KEYS, EFFORT, MODELS } from "../config.js";
+import { API_KEYS, visionKey } from "../config.js";
 import { tryImport } from "../ingest/optional.js";
-import type { LlmSession } from "../llm/client.js";
+import type { LlmContent, LlmSession } from "../llm/index.js";
 
 export interface OcrProviderResult {
   engine: string;
@@ -25,23 +24,24 @@ const VISION_OCR_SYSTEM = `당신은 한국어/영어 혼용 문서 전용 OCR �
 9. 이미지에 글자가 하나도 없으면 정확히 "[[NO_TEXT]]" 만 출력한다.
 10. 설명·인사·머리말을 붙이지 말고 추출된 텍스트만 출력한다.`;
 
-/** 주 엔진: Claude Vision. 레이아웃 이해력이 가장 높다. */
-export async function claudeVisionOcr(
+/**
+ * 주 엔진: LLM Vision (Gemini).
+ * 레이아웃 이해력이 높아 다단·표·손글씨가 섞인 한국어 문서에서 가장 잘 읽는다.
+ */
+export async function visionLlmOcr(
   session: LlmSession,
   images: Uint8Array[],
-  mediaType: "image/png" | "image/jpeg" | "image/webp" = "image/png",
+  mediaType = "image/png",
   hint?: string,
 ): Promise<OcrProviderResult> {
+  const engine = `${session.providerName}-vision`;
   try {
-    const content: Anthropic.ContentBlockParam[] = [];
+    const content: LlmContent[] = [];
     images.forEach((img, i) => {
       if (images.length > 1) {
         content.push({ type: "text", text: `--- 조각 ${i + 1}/${images.length} ---` });
       }
-      content.push({
-        type: "image",
-        source: { type: "base64", media_type: mediaType, data: Buffer.from(img).toString("base64") },
-      });
+      content.push({ type: "image", mediaType, dataBase64: Buffer.from(img).toString("base64") });
     });
     content.push({
       type: "text",
@@ -52,40 +52,42 @@ export async function claudeVisionOcr(
           : "이 이미지의 텍스트를 규칙대로 추출하라."),
     });
 
-    const text = await session.text(
-      "ocr:claude-vision",
-      MODELS.visionOcr,
-      EFFORT.visionOcr,
-      VISION_OCR_SYSTEM,
-      content,
-    );
-    return { engine: "claude-vision", text: text.trim() };
+    const text = await session.text("ocr", VISION_OCR_SYSTEM, content);
+    return { engine, text: text.trim() };
   } catch (e) {
-    return { engine: "claude-vision", text: "", error: (e as Error).message };
+    return { engine, text: "", error: (e as Error).message };
   }
 }
 
-/** 보조 엔진: Google Cloud Vision DOCUMENT_TEXT_DETECTION */
+/**
+ * 보조 엔진: Google Cloud Vision DOCUMENT_TEXT_DETECTION.
+ * 같은 Google API 키를 쓴다 — GCP 프로젝트에서 Cloud Vision API를 켜 두면 자동으로 붙는다.
+ * 안 켜져 있으면 403이 나고 조용히 건너뛴다.
+ */
 export async function googleVisionOcr(image: Uint8Array): Promise<OcrProviderResult> {
-  if (!API_KEYS.googleVision) return { engine: "google-vision", text: "", error: "키 없음" };
+  const key = visionKey();
+  if (!key) return { engine: "google-vision", text: "", error: "키 없음" };
   try {
-    const res = await fetch(
-      `https://vision.googleapis.com/v1/images:annotate?key=${API_KEYS.googleVision}`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          requests: [
-            {
-              image: { content: Buffer.from(image).toString("base64") },
-              features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
-              imageContext: { languageHints: ["ko", "en"] },
-            },
-          ],
-        }),
-      },
-    );
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${key}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        requests: [
+          {
+            image: { content: Buffer.from(image).toString("base64") },
+            features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
+            imageContext: { languageHints: ["ko", "en"] },
+          },
+        ],
+      }),
+    });
+    if (!res.ok) {
+      const hint =
+        res.status === 403
+          ? "Cloud Vision API가 꺼져 있습니다(선택 기능이라 건너뜁니다)."
+          : `HTTP ${res.status}`;
+      return { engine: "google-vision", text: "", error: hint };
+    }
     const json: any = await res.json();
     const ann = json?.responses?.[0]?.fullTextAnnotation;
     return { engine: "google-vision", text: (ann?.text ?? "").trim() };
@@ -94,7 +96,7 @@ export async function googleVisionOcr(image: Uint8Array): Promise<OcrProviderRes
   }
 }
 
-/** 보조 엔진: NAVER CLOVA OCR — 한국어 인쇄체/영수증/증명서에 강하다 */
+/** 보조 엔진: NAVER CLOVA OCR — 한국어 인쇄체/증명서에 강하다 (선택) */
 export async function clovaOcr(image: Uint8Array): Promise<OcrProviderResult> {
   const { invokeUrl, secret } = API_KEYS.clova;
   if (!invokeUrl || !secret) return { engine: "clova", text: "", error: "키 없음" };
@@ -125,7 +127,7 @@ export async function clovaOcr(image: Uint8Array): Promise<OcrProviderResult> {
   }
 }
 
-/** 오프라인 폴백: tesseract.js (kor+eng). 네트워크·키 없이 동작 */
+/** 오프라인 폴백: tesseract.js (kor+eng). 키·네트워크 없이 동작 */
 export async function tesseractOcr(image: Uint8Array): Promise<OcrProviderResult> {
   const mod = await tryImport<any>("tesseract.js");
   if (!mod) return { engine: "tesseract", text: "", error: "tesseract.js 미설치" };

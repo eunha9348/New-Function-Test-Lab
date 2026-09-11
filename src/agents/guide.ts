@@ -1,10 +1,10 @@
-import { EFFORT, MODELS, PIPELINE } from "../config.js";
+import { PIPELINE } from "../config.js";
 import { EXPERIENCE_TYPES, allFieldsFor, labelForPath } from "../schema/index.js";
 import type {
   ClassificationResult, ExperienceTypeSpec, ExtractedDoc, ExtractionResult,
   FallbackGuide, FieldSpec, MissingGuide,
 } from "../types.js";
-import type { LlmSession } from "../llm/client.js";
+import type { LlmSession } from "../llm/index.js";
 import { getByPath, isEmptyValue } from "../util/path.js";
 
 const SYSTEM = `당신은 ARC 경험 기록 서비스의 **Fallback 안내 에이전트**다.
@@ -129,8 +129,6 @@ export async function buildFallbackGuide(
     nextQuestions: string[];
   }>({
     stage: "guide",
-    model: MODELS.guide,
-    effort: EFFORT.guide,
     systemStable: `${SYSTEM}\n\n── 대상 유형: ${type.emoji} ${type.label} (${type.id}) ──`,
     toolName: "submit_guide",
     toolDescription: "빈 항목별 안내와 추가 질문을 제출한다.",

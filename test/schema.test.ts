@@ -226,4 +226,161 @@ await test("텍스트·CSV·HTML 수집이 API 호출 없이 동작한다", asyn
   assert.ok(!docs[2]!.text.includes("x=1"));
 });
 
+
+/* ───────── Gemini 스키마 변환 / 프론트 바인딩 ───────── */
+
+const { toGeminiSchema, coerceToSchema } = await import("../src/llm/gemini-schema.js");
+const { pickByPreference } = await import("../src/llm/gemini.js");
+const { toFormState } = await import("../src/form.js");
+
+await test("JSON Schema → Gemini 스키마: 유니온 타입이 nullable로 바뀐다", () => {
+  const g: any = toGeminiSchema({
+    type: "object",
+    properties: {
+      name: { type: ["string", "null"], description: "이름" },
+      count: { type: "integer" },
+      tags: { type: ["array", "null"], items: { type: "string" } },
+    },
+    required: ["name", "count", "tags"],
+    additionalProperties: false,
+  });
+  assert.equal(g.type, "OBJECT");
+  assert.equal(g.properties.name.type, "STRING");
+  assert.equal(g.properties.name.nullable, true);
+  assert.equal(g.properties.count.nullable, undefined);
+  assert.equal(g.properties.tags.type, "ARRAY");
+  assert.equal(g.properties.tags.items.type, "STRING");
+  // nullable 필드는 required에서 빠지고, additionalProperties는 제거된다
+  assert.deepEqual(g.required, ["count"]);
+  assert.equal("additionalProperties" in g, false);
+  assert.deepEqual(g.propertyOrdering, ["name", "count", "tags"]);
+});
+
+await test("Gemini 스키마 변환이 18종 전체에서 깨지지 않는다", () => {
+  const walk = (n: any, where: string) => {
+    assert.ok(typeof n.type === "string", `${where}: type이 문자열이 아님`);
+    assert.ok(
+      ["STRING", "NUMBER", "INTEGER", "BOOLEAN", "ARRAY", "OBJECT"].includes(n.type),
+      `${where}: 알 수 없는 type ${n.type}`,
+    );
+    assert.equal("additionalProperties" in n, false, `${where}`);
+    if (n.properties) for (const [k, v] of Object.entries(n.properties)) walk(v, `${where}.${k}`);
+    if (n.items) walk(n.items, `${where}[]`);
+  };
+  for (const t of EXPERIENCE_TYPES) {
+    walk(toGeminiSchema(extractionToolSchema(allFieldsFor(t))), t.id);
+  }
+});
+
+await test("coerce: 보기 밖 값·가짜 null 문자열을 정리한다", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      employmentType: { type: ["string", "null"], enum: ["인턴", "계약직", "정규직", "프리랜서", null] },
+      companyName: { type: ["string", "null"] },
+      salary: { type: ["string", "null"] },
+      tags: { type: ["array", "null"], items: { type: "string" } },
+    },
+    required: ["employmentType", "companyName", "salary", "tags"],
+    additionalProperties: false,
+  };
+  const out: any = coerceToSchema(
+    { employmentType: "인턴십", companyName: "라온테크", salary: "해당 없음", tags: [] },
+    schema,
+  );
+  assert.equal(out.employmentType, "인턴", "보기 안으로 정규화");
+  assert.equal(out.companyName, "라온테크");
+  assert.equal(out.salary, null, "'해당 없음'은 null로");
+  assert.equal(out.tags, null, "빈 배열은 null로");
+});
+
+await test("coerce: 응답에 빠진 키를 null로 채워 폼 형태를 고정한다", () => {
+  const schema = {
+    type: "object",
+    properties: { a: { type: ["string", "null"] }, b: { type: ["string", "null"] } },
+    required: ["a", "b"],
+    additionalProperties: false,
+  };
+  assert.deepEqual(coerceToSchema({ a: "값" }, schema), { a: "값", b: null });
+});
+
+await test("모델 자동 선택은 최신 세대의 pro를 고른다", () => {
+  const prefer = [
+    /^gemini-(\d+(?:\.\d+)?)-pro$/,
+    /^gemini-(\d+(?:\.\d+)?)-pro-preview/,
+    /^gemini-(\d+(?:\.\d+)?)-flash$/,
+  ];
+  const models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-pro", "gemini-1.5-pro", "embedding-001"];
+  assert.equal(pickByPreference(models, prefer), "gemini-3-pro");
+  assert.equal(pickByPreference(["gemini-2.5-flash", "embedding-001"], prefer), "gemini-2.5-flash");
+  assert.equal(pickByPreference(["embedding-001"], prefer), null);
+});
+
+await test("toFormState가 프론트에 바로 꽂히는 형태를 만든다", () => {
+  const work = EXPERIENCE_TYPES.find((t) => t.id === "career.work")!;
+  const { layout, hiddenCommonKeys } = resolveLayout(work);
+  const values = {
+    title: "라온테크 하계 인턴",
+    companyName: "주식회사 라온테크",
+    position: "백엔드 인턴",
+    tasks: [{ name: "주문 API 개선", role: "단독 담당", detail: "N+1 제거" }],
+    salary: null,
+  };
+  const form = toFormState({
+    categoryId: "career", categoryLabel: "커리어",
+    typeId: work.id, typeLabel: work.label,
+    classification: {
+      categoryId: "career", typeId: work.id, confidence: 0.92,
+      rationale: "재직증명 문구가 있음", alternatives: [],
+      multipleExperiences: false, splitSuggestions: [],
+    },
+    form: { values, layout, hiddenCommonKeys },
+    provenance: [
+      { path: "companyName", value: undefined, confidence: 0.95,
+        quotes: [{ sourceId: "src1", text: "회사: 주식회사 라온테크" }] },
+    ],
+    review: {
+      rounds: 1,
+      final: {
+        verdict: "approve",
+        scores: { classification: 95, coverage: 70, faithfulness: 92, formatting: 100 },
+        issues: [{ severity: "major", type: "format", path: "salary", detail: "급여가 비어 있음", foundBy: "validator" }],
+        patch: {}, comment: "",
+      },
+      history: [],
+    },
+    fallback: {
+      completeness: 64,
+      missing: [{ path: "salary", label: "급여", why: "원문에 없음", whatToProvide: "월 급여를 알려주세요",
+                  question: "급여는 얼마였나요?", exampleAnswer: "월 220만원", priority: "low" }],
+      recommendedUploads: ["경력증명서"],
+      nextQuestions: ["담당 업무의 성과를 숫자로 알려주실 수 있나요?"],
+    },
+    ingest: { docs: [{ sourceId: "src1", name: "보고서.pdf", kind: "pdf", chars: 1200, confidence: 1, warnings: [] }] },
+    usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, estimatedCostUsd: 0.01, calls: [{ stage: "extract", ms: 900 }] },
+  });
+
+  assert.equal(form.typeLabel, "인턴 및 업무 경력");
+  assert.equal(form.values, values, "values는 그대로 바인딩된다");
+
+  const company = form.fields.find((f) => f.key === "companyName")!;
+  assert.equal(company.filled, true);
+  assert.equal(company.value, "주식회사 라온테크");
+  assert.equal(company.evidence[0]!.fileName, "보고서.pdf", "근거에 파일명이 붙는다");
+
+  const salary = form.fields.find((f) => f.key === "salary")!;
+  assert.equal(salary.filled, false);
+  assert.equal(salary.guide?.question, "급여는 얼마였나요?", "빈 칸에는 안내 질문이 붙는다");
+
+  const tasks = form.fields.find((f) => f.key === "tasks")!;
+  assert.equal(tasks.kind, "repeater");
+  assert.ok(tasks.itemFields?.some((f) => f.key === "metrics"), "행 템플릿이 들어 있다");
+
+  // 전용 항목이 대체한 공통 항목은 확장 입력에서 빠진다
+  const ext = form.sections.find((s) => s.zone === "extended")!;
+  assert.ok(!ext.fields.some((f) => f.key === "period"), "재직기간이 기간을 대체");
+  assert.ok(form.sections.some((s) => s.title === "근무 정보"));
+  assert.equal(form.review.attentionFields[0]!.label, "급여");
+});
+
 console.log(`\n${passed}개 통과${process.exitCode ? " (실패 있음)" : ""}\n`);

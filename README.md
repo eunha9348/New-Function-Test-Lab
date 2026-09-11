@@ -18,16 +18,19 @@
    └─ ④ Fallback 안내 ─── 못 채운 칸은 비우고, "무엇을 주면 채워지는지" 질문 생성
 ```
 
+**엔진은 Google Gemini입니다. Google API 키 하나만 있으면 됩니다.**
+자세한 사용법은 **[USAGE.md](./USAGE.md)** 를 보세요.
+
 ## 빠른 시작
 
 ```bash
 npm install
-# src/config.ts 의 API_KEYS.anthropic 에 키를 넣거나 .env에 ANTHROPIC_API_KEY 설정
+cp .env.example .env      # GOOGLE_API_KEY=AIza... 붙여넣기
+npm run check             # 키 확인 + 선택된 모델 표시
 
-npm run organize -- ./인턴_최종보고서.pdf ./상장.jpg --hint "작년 여름 인턴"
-npm run organize -- ./포트폴리오.zip --out result.json
-npm run organize -- --list-types        # 18종 유형 목록
-npm test                                # API 키 없이 도는 오프라인 검증 16종
+npm run serve             # → http://localhost:5174  파일을 끌어다 놓으면 폼이 채워집니다
+npm run organize -- ./인턴_최종보고서.pdf --hint "작년 여름 인턴"
+npm test                  # API 키 없이 도는 오프라인 검증 22종
 ```
 
 라이브러리로 쓸 때:
@@ -50,16 +53,21 @@ result.fallback.nextQuestions; // 사용자에게 되물을 질문
 
 ## ★ API 키 넣는 곳
 
-`src/config.ts` **한 곳**에만 있습니다. 환경변수를 쓰면 그대로 두면 되고, 하드코딩하려면 빈 문자열 자리에 적으면 됩니다.
+`src/config.ts` **한 곳**에만 있습니다. `.env`의 `GOOGLE_API_KEY`를 쓰면 그대로 두면 되고,
+하드코딩하려면 `API_KEYS.google`의 빈 문자열 자리에 적으면 됩니다.
 
 | 키 | 필요성 | 용도 |
 |---|---|---|
-| `API_KEYS.anthropic` | **필수** | 분류·배분·감독·Vision OCR |
-| `API_KEYS.googleVision` | 선택 | OCR 보조 엔진 (앙상블 정확도 ↑) |
-| `API_KEYS.clova` | 선택 | 한국어 문서 특화 OCR 보조 엔진 |
-| `API_KEYS.openaiWhisper` | 선택 | 음성/영상 STT |
+| `API_KEYS.google` | **필수** | Gemini — 분류·배분·감독·안내 + 이미지 OCR + 음성 인식 |
+| `API_KEYS.googleVision` | 선택 | OCR 보조. 비우면 위 키를 그대로 씀 (Cloud Vision API를 켠 경우만 동작) |
+| `API_KEYS.clova` | 선택 | 한국어 증명서 특화 OCR 보조 엔진 |
+| `API_KEYS.anthropic` | 선택 | 엔진을 Anthropic으로 바꿀 때만 (`PROVIDER = "anthropic"`) |
 
 선택 키가 없으면 **자동으로 건너뛰고** 나머지 엔진으로 계속 돕니다. 키 없다고 멈추지 않습니다.
+
+**모델은 하드코딩하지 않습니다.** Gemini 모델 ID는 자주 바뀌고 구버전은 종료되므로,
+시작할 때 ListModels로 실제 사용 가능한 목록을 받아 **가장 최신 세대**를 자동으로 고릅니다.
+고정하려면 `.env`에 `GEMINI_MODEL=...` 을 넣으세요.
 
 ## 파일 수용 범용성
 
@@ -71,8 +79,8 @@ result.fallback.nextQuestions; // 사용자에게 되물을 질문
 | | xlsx · xls · csv · tsv | 시트를 표 텍스트로 (열 이름 유지) |
 | | hwp · hwpx | HWPX는 ZIP+XML 직접 파싱, HWP는 hwp.js / hwp5txt |
 | 이미지 | png jpg webp gif bmp tiff heic avif | 전처리 + 다중 엔진 앙상블 OCR, EXIF 촬영일 추출 |
-| 미디어 | mp3 m4a wav … | Whisper STT |
-| | mp4 mov mkv … | 오디오 STT **+ 장면 전환 프레임 OCR** (발표 슬라이드·화면 녹화) |
+| 미디어 | mp3 m4a wav … | Gemini에 오디오를 그대로 들려줘 받아쓰기 (별도 STT 서비스 불필요) |
+| | mp4 mov mkv … | 오디오 받아쓰기 **+ 장면 전환 프레임 OCR** (발표 슬라이드·화면 녹화) |
 | 웹/메일 | html htm xml eml | 본문 추출 + 링크 보존, 메일 헤더 파싱 |
 | 코드/노트북 | ts py java … ipynb | 그대로 + 노트북은 마크다운/코드/출력 분해 |
 | 압축 | zip | 내부 파일을 각각 재귀 처리 (최대 40개, 깊이 2) |
@@ -97,9 +105,9 @@ Vision 모델용(비이진화)과 고전 OCR용(이진화) 두 벌을 만듭니�
 
 | 엔진 | 역할 |
 |---|---|
-| Claude Vision | **주 엔진.** 다단 레이아웃·표·손글씨·도장까지 읽고 읽기 순서를 지킴 |
-| Google Vision | 보조. 인쇄체 정밀도 |
-| NAVER CLOVA | 보조. 한국어 증명서·영수증 특화 |
+| Gemini Vision | **주 엔진.** 다단 레이아웃·표·손글씨·도장까지 읽고 읽기 순서를 지킴 |
+| Google Cloud Vision | 보조. 인쇄체 정밀도 (같은 키, API를 켠 경우에만) |
+| NAVER CLOVA | 보조. 한국어 증명서·영수증 특화 (선택) |
 | tesseract.js | 오프라인 폴백. 키·네트워크 없이 동작 |
 
 주 엔진 프롬프트는 **원문 그대로 복사**를 강제하고, 확신 없는 글자는 `«불명»`으로 표시하게 합니다.
@@ -180,6 +188,39 @@ Vision 모델용(비이진화)과 고전 OCR용(이진화) 두 벌을 만듭니�
 전용 항목과 의미가 겹치는 공통 항목은 `supersedes`로 선언되어 **화면에서 자동으로 숨겨집니다**
 (값은 저장됨 — 실제 `ExperienceFormV2.formLayout` 동작과 동일).
 
+## 프론트엔드 자동 채움
+
+**파일 하나 올리면 프론트 폼이 알아서 채워집니다.** 핵심은 `toFormState(result)` 하나입니다.
+"어떤 폼을 그릴지"와 "각 칸에 무슨 값이 들어가는지"가 한 객체에 같이 들어 있어,
+프론트는 ARC 스키마 내부를 몰라도 됩니다.
+
+```tsx
+const res  = await fetch("/api/organize", { method: "POST", body: fd });
+const form = await res.json();     // FormState
+
+setValues(form.values);            // ★ 이 한 줄로 모든 칸이 채워짐
+
+form.sections.map((section) => (   // 유형에 맞는 폼이 자동 생성됨
+  <fieldset key={section.title}>
+    <legend>{section.title}</legend>
+    {section.fields.map((f) => (
+      <label key={f.key}>
+        {f.label}{f.filled && <span className="badge">자동</span>}
+        <input value={values[f.key] ?? ""} placeholder={f.guide?.question} … />
+        {!f.filled && f.guide && <small>{f.guide.whatToProvide}</small>}
+      </label>
+    ))}
+  </fieldset>
+))
+```
+
+각 필드에는 값뿐 아니라 `filled`(자동 채움 배지), `confidence`(신뢰도),
+`evidence`(어느 파일 어느 문장에서 왔는지 — "출처 보기"), `guide`(빈 칸 안내 문구),
+`options`(보기), `itemFields`(반복 입력 행 구성)가 함께 옵니다.
+
+동작하는 전체 예제가 `public/index.html`에 있습니다 — `npm run serve` 로 바로 확인하세요.
+Next.js 연동 코드와 `FormState` 전체 레퍼런스는 **[USAGE.md](./USAGE.md)** 에 있습니다.
+
 ## ARC 본체에 붙이기
 
 이 저장소는 ARC 본체와 독립적으로 돌도록 짜여 있습니다. 붙일 때 건드릴 곳은 두 군데입니다.
@@ -187,23 +228,9 @@ Vision 모델용(비이진화)과 고전 OCR용(이진화) 두 벌을 만듭니�
 1. **스키마** — `src/schema/templates-v2.ts`가 문서 기준으로 새로 정의한 것입니다.
    본체에 이미 `lib/constants/templates-v2.ts`가 있다면, 그쪽 상수를 읽어
    `ExperienceTypeSpec[]`로 변환하는 어댑터만 끼우면 나머지 전부 그대로 돕니다.
-2. **결과 바인딩** — `result.form.values`가 폼 상태, `result.form.layout`이 렌더 순서입니다.
-   `hiddenCommonKeys`는 중복 제거로 숨길 공통 항목입니다.
-
-```ts
-// 예: Next.js Route Handler
-export async function POST(req: Request) {
-  const form = await req.formData();
-  const files = await Promise.all(
-    form.getAll("files").map(async (f) => {
-      const file = f as File;
-      return { name: file.name, mimeType: file.type, bytes: new Uint8Array(await file.arrayBuffer()) };
-    }),
-  );
-  const result = await organizeExperience(files, { userHint: String(form.get("hint") ?? "") });
-  return Response.json(result);
-}
-```
+2. **결과 바인딩** — `toFormState(result)`를 쓰면 위처럼 바로 끝나고,
+   더 세밀하게 다루고 싶으면 `result.form.values` / `result.form.layout` /
+   `result.form.hiddenCommonKeys`를 직접 쓰면 됩니다.
 
 ## 튜닝 포인트 (`src/config.ts`)
 
@@ -213,7 +240,7 @@ export async function POST(req: Request) {
 | `classificationConfidenceFloor` | 0.55 | 미만이면 사용자에게 유형 확인 요청 |
 | `fieldConfidenceFloor` | 0.4 | 미만인 값은 자동으로 비움 |
 | `ocrAgreementFloor` | 0.82 | 엔진 간 일치율이 미만이면 타일 재판독 |
-| `EFFORT.supervisor` | `xhigh` | 감독만 높게 — 정확도가 여기서 갈림 |
+| `THINKING.supervisor` | `-1`(자동) | 감독만 깊게 — 정확도가 여기서 갈림. `0`이면 빠르고 쌈 |
 
 ## 선택 설치로 얻는 것
 
@@ -223,3 +250,14 @@ apt install poppler-utils ffmpeg                          # 스캔 PDF 렌더 / 
 ```
 
 없으면 그 부분만 건너뛰고 `warnings`에 이유가 남습니다.
+
+## 엔진 바꾸기
+
+기본은 Gemini입니다. Anthropic으로 바꾸려면 `.env`에 다음을 넣으세요.
+
+```bash
+ARC_LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+파이프라인·에이전트·검증기는 엔진과 분리돼 있어(`src/llm/provider.ts`) 나머지 코드는 그대로입니다.

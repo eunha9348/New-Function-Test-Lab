@@ -1,11 +1,11 @@
 import { PIPELINE } from "../config.js";
-import type { LlmSession } from "../llm/client.js";
+import type { LlmSession } from "../llm/index.js";
 import { prepareImage, tileVertically } from "./preprocess.js";
 import {
-  claudeVisionOcr,
   clovaOcr,
   googleVisionOcr,
   tesseractOcr,
+  visionLlmOcr,
   type OcrProviderResult,
 } from "./providers.js";
 
@@ -74,7 +74,7 @@ export async function ocrImage(
   const warnings = [...prep.warnings];
 
   const [primary, ...secondaries] = await Promise.all([
-    claudeVisionOcr(session, [prep.enhanced], "image/png", opts.hint),
+    visionLlmOcr(session, [prep.enhanced], "image/png", opts.hint),
     googleVisionOcr(prep.enhanced),
     clovaOcr(prep.enhanced),
     tesseractOcr(prep.binary),
@@ -88,7 +88,7 @@ export async function ocrImage(
     const alt = usable.sort((a, b) => b.text.length - a.text.length)[0];
     if (alt) {
       best = alt;
-      warnings.push(`Claude Vision 실패(${primary!.error ?? "빈 결과"}) → ${alt.engine} 결과 사용`);
+      warnings.push(`주 OCR 엔진 실패(${primary!.error ?? "빈 결과"}) → ${alt.engine} 결과 사용`);
     }
   }
 
@@ -102,7 +102,7 @@ export async function ocrImage(
   if ((opts.allowReread ?? true) && (tall || disagrees)) {
     const tiles = await tileVertically(prep.enhanced, prep.height);
     if (tiles.length > 1) {
-      const retry = await claudeVisionOcr(session, tiles, "image/png", opts.hint);
+      const retry = await visionLlmOcr(session, tiles, "image/png", opts.hint);
       if (retry.text && retry.text !== "[[NO_TEXT]]") {
         // 타일 판독이 더 많은 글자를 건졌으면 채택
         if (norm(retry.text).length >= norm(best.text).length * 0.9) {

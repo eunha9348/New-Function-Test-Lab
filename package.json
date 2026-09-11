@@ -13,10 +13,9 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "organize": "tsx src/cli.ts",
-    "test": "tsx test/schema.test.ts"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.125.0"
+    "test": "tsx test/schema.test.ts",
+    "serve": "tsx server/server.ts",
+    "check": "tsx src/cli.ts --check"
   },
   "optionalDependencies": {
     "sharp": "^0.34.0",
@@ -26,12 +25,15 @@
     "jszip": "^3.10.1",
     "tesseract.js": "^5.1.1",
     "node-html-parser": "^6.1.13",
-    "hwp.js": "^0.0.3"
+    "hwp.js": "^0.0.3",
+    "@anthropic-ai/sdk": "^0.125.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

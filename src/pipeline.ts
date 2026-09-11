@@ -4,7 +4,7 @@ import { extract } from "./agents/extractor.js";
 import { buildFallbackGuide } from "./agents/guide.js";
 import { supervise } from "./agents/supervisor.js";
 import { ingestFiles } from "./ingest/index.js";
-import { LlmSession } from "./llm/client.js";
+import { createSession, type LlmSession } from "./llm/index.js";
 import { CATEGORIES, EXPERIENCE_TYPES, TYPE_BY_ID, resolveLayout } from "./schema/index.js";
 import type {
   ExperienceTypeSpec, ExtractionResult, InputFile, OrganizeResult,
@@ -37,7 +37,7 @@ export async function organizeExperience(
   options: OrganizeOptions = {},
 ): Promise<OrganizeResult> {
   const onProgress = options.onProgress;
-  const session = options.session ?? new LlmSession();
+  const session = options.session ?? (await createSession());
 
   /* ── 0. 수집 / OCR ─────────────────────────────── */
   const docs = await ingestFiles(session, files, onProgress);

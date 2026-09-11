@@ -1,5 +1,5 @@
 import type { ExtractedDoc, ExtractedPage, InputFile, ProgressHandler, SourceKind } from "../types.js";
-import type { LlmSession } from "../llm/client.js";
+import type { LlmSession } from "../llm/index.js";
 import { ocrImage } from "../ocr/index.js";
 import { detectKind, extensionOf, guessMime, looksLikeText, refineZip } from "./detect.js";
 import { tryImport } from "./optional.js";
@@ -216,13 +216,13 @@ async function extractOne(
       break;
     }
     case "audio": {
-      const r = await extractAudio(bytes, file.name);
+      const r = await extractAudio(session, bytes, file.name);
       pages.push(...r.pages); Object.assign(metadata, r.metadata); warnings.push(...r.warnings);
       confidence = r.pages.length ? 0.8 : 0.2;
       break;
     }
     case "video": {
-      const r = await extractVideo(bytes, file.name);
+      const r = await extractVideo(session, bytes, file.name);
       pages.push(...r.pages); Object.assign(metadata, r.metadata); warnings.push(...r.warnings);
       for (const [i, frame] of r.frames.entries()) {
         const ocr = await ocrImage(session, frame, { hint: `${file.name} 장면 ${i + 1}`, allowReread: false });

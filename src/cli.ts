@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { promises as fs } from "node:fs";
+import { createSession } from "./llm/index.js";
+import { toFormState } from "./form.js";
 import { organizeExperience } from "./pipeline.js";
 import { readInputFiles } from "./read-files.js";
 import { EXPERIENCE_TYPES } from "./schema/index.js";
@@ -16,7 +18,9 @@ const HELP = `ARC 경험 자동 정리
   --hint "<설명>"     활동에 대한 추가 설명
   --type <유형id>     유형을 직접 지정 (분류 단계 생략)
   --list-types        18종 유형 목록 출력
-  --json              사람이 읽는 요약 대신 JSON만 출력
+  --json              사람이 읽는 요약 대신 전체 JSON 출력
+  --form              프론트엔드 바인딩용 FormState JSON만 출력
+  --check             API 키와 선택된 모델만 확인하고 종료
 
 예시:
   npm run organize -- ./인턴_최종보고서.pdf ./상장.jpg --hint "작년 여름 인턴"
@@ -109,6 +113,22 @@ function printSummary(r: OrganizeResult) {
 async function main() {
   const { files, opts } = parseArgs(process.argv.slice(2));
 
+  if (opts.check) {
+    try {
+      const session = await createSession();
+      const check = await session.verify();
+      console.log(`엔진    : ${session.providerName}`);
+      console.log(`모델    : ${await session.resolveModel("extract")}`);
+      console.log(`보조모델: ${await session.resolveModel("guide")}`);
+      console.log(`상태    : ${check.ok ? "정상" : "오류"} — ${check.detail}`);
+      if (!check.ok) process.exit(1);
+    } catch (e) {
+      console.error(`상태   : 오류\n${(e as Error).message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
   if (opts["list-types"]) {
     for (const t of EXPERIENCE_TYPES) console.log(`${t.id.padEnd(26)} ${t.emoji} ${t.label}`);
     return;
@@ -119,7 +139,7 @@ async function main() {
   }
 
   const inputs = await readInputFiles(files);
-  const quiet = !!opts.json;
+  const quiet = !!opts.json || !!opts.form;
 
   const result = await organizeExperience(inputs, {
     userHint: typeof opts.hint === "string" ? opts.hint : undefined,
@@ -133,7 +153,8 @@ async function main() {
     await fs.writeFile(opts.out, JSON.stringify(result, null, 2), "utf-8");
     if (!quiet) console.error(`  결과 저장: ${opts.out}`);
   }
-  if (quiet) console.log(JSON.stringify(result, null, 2));
+  if (opts.form) console.log(JSON.stringify(toFormState(result), null, 2));
+  else if (quiet) console.log(JSON.stringify(result, null, 2));
   else printSummary(result);
 }
 

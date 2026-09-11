@@ -1,9 +1,9 @@
-import { EFFORT, MODELS, PIPELINE } from "../config.js";
+import { PIPELINE } from "../config.js";
 import { allFieldsFor, extractionToolSchema, labelForPath, resolveLayout } from "../schema/index.js";
 import type {
   ExperienceTypeSpec, ExtractedDoc, ExtractionResult, FieldSpec, FieldValue,
 } from "../types.js";
-import type { LlmSession } from "../llm/client.js";
+import type { LlmSession } from "../llm/index.js";
 import { buildEvidenceBundle } from "./evidence.js";
 import { isEmptyValue, setByPath } from "../util/path.js";
 
@@ -74,8 +74,6 @@ export async function extract(
     unfilled: { path: string; reason: string }[];
   }>({
     stage: "extract",
-    model: MODELS.extractor,
-    effort: EFFORT.extractor,
     systemStable,
     systemVolatile: [
       opts.userHint ? `사용자가 준 추가 맥락: ${opts.userHint}` : "",

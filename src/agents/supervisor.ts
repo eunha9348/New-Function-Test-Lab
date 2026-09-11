@@ -1,9 +1,9 @@
-import { EFFORT, MODELS } from "../config.js";
+
 import { EXPERIENCE_TYPES, allFieldsFor, labelForPath } from "../schema/index.js";
 import type {
   ExperienceTypeSpec, ExtractedDoc, ExtractionResult, ReviewIssue, ReviewResult,
 } from "../types.js";
-import type { LlmSession } from "../llm/client.js";
+import type { LlmSession } from "../llm/index.js";
 import { buildEvidenceBundle } from "./evidence.js";
 
 const SYSTEM = `당신은 ARC 경험 기록 서비스의 **3단계 감독(Supervisor) 에이전트**다.
@@ -140,8 +140,6 @@ export async function supervise(
     comment: string;
   }>({
     stage: "supervise",
-    model: MODELS.supervisor,
-    effort: EFFORT.supervisor,
     systemStable,
     toolName: "submit_review",
     toolDescription: "검수 결과와 수정 패치를 제출한다.",

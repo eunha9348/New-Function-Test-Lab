@@ -1,7 +1,7 @@
-import { EFFORT, MODELS } from "../config.js";
+
 import { CATEGORIES, EXPERIENCE_TYPES } from "../schema/index.js";
 import type { ClassificationResult, ExtractedDoc } from "../types.js";
-import type { LlmSession } from "../llm/client.js";
+import type { LlmSession } from "../llm/index.js";
 import { buildClassificationDigest } from "./evidence.js";
 
 /** 캐시되는 안정 프리픽스 — 18종 카탈로그. 요청마다 동일해야 캐시가 산다. */
@@ -94,8 +94,6 @@ export async function classify(
   const digest = buildClassificationDigest(docs);
   const result = await session.structured<ClassificationResult>({
     stage: "classify",
-    model: MODELS.classifier,
-    effort: EFFORT.classifier,
     systemStable: SYSTEM,
     systemVolatile: userHint ? `사용자가 준 추가 맥락: ${userHint}` : undefined,
     toolName: "submit_classification",

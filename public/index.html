@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ARC 경험 자동 정리</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfa; --panel: #fff; --ink: #1f2024; --muted: #6b6f76;
+    --line: #e5e5e3; --accent: #2f6df6; --ok: #1a8a54; --warn: #b4690e;
+    --chip: #f0f0ee;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16171a; --panel:#1e2024; --ink:#e9e9ea; --muted:#9a9ea6;
+            --line:#2e3138; --accent:#6b9bff; --ok:#4bbd84; --warn:#e0a445; --chip:#26292f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:15px/1.6 -apple-system,BlinkMacSystemFont,"Pretendard","Apple SD Gothic Neo",
+              "Malgun Gothic",system-ui,sans-serif; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 32px 20px 80px; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -.02em; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+
+  #drop { border: 2px dashed var(--line); border-radius: 14px; padding: 40px 20px;
+          text-align: center; background: var(--panel); cursor: pointer; transition: .15s; }
+  #drop.hot { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+  #drop strong { display:block; font-size:16px; margin-bottom:6px; }
+  #drop span { color: var(--muted); font-size: 13px; }
+  #hint { width:100%; margin-top:12px; padding:10px 12px; border:1px solid var(--line);
+          border-radius:9px; background:var(--panel); color:var(--ink); font:inherit; }
+
+  #log { margin-top:16px; font-size:13px; color:var(--muted); white-space:pre-wrap;
+         font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  .badges { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin: 24px 0 8px; }
+  .badge { background:var(--chip); border-radius:999px; padding:4px 11px; font-size:12.5px; }
+  .badge.type { background: color-mix(in srgb, var(--accent) 15%, transparent);
+                color: var(--accent); font-weight: 600; }
+  .badge.ok { color: var(--ok); }
+  .badge.warn { color: var(--warn); }
+
+  .bar { height:6px; background:var(--chip); border-radius:99px; overflow:hidden; margin:10px 0 26px; }
+  .bar i { display:block; height:100%; background:var(--accent); transition:width .4s; }
+
+  section { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+            padding:18px 20px; margin-bottom:14px; }
+  section > h2 { font-size:14px; margin:0 0 14px; letter-spacing:-.01em;
+                 display:flex; align-items:center; gap:8px; }
+  section.collapsed > .body { display:none; }
+  section > h2 .toggle { margin-left:auto; font-size:12px; color:var(--muted); font-weight:400; }
+
+  .field { margin-bottom:16px; }
+  .field:last-child { margin-bottom:0; }
+  label { display:flex; align-items:center; gap:6px; font-size:13px;
+          color:var(--muted); margin-bottom:5px; }
+  label .req { color:#d1453b; }
+  label .auto { font-size:11px; background:color-mix(in srgb,var(--ok) 16%,transparent);
+                color:var(--ok); border-radius:4px; padding:1px 5px; }
+  label .src { font-size:11px; color:var(--muted); cursor:help; border-bottom:1px dotted var(--muted); }
+  input[type=text], input[type=date], textarea, select {
+    width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px;
+    background:var(--bg); color:var(--ink); font:inherit; }
+  textarea { min-height:76px; resize:vertical; line-height:1.55; }
+  input::placeholder, textarea::placeholder { color:color-mix(in srgb,var(--muted) 70%,transparent); }
+  .empty input, .empty textarea, .empty select { border-style:dashed; }
+  .guide { font-size:12px; color:var(--warn); margin-top:5px; }
+  .range { display:flex; gap:8px; align-items:center; }
+  .range input { flex:1; }
+  .checks { display:flex; flex-wrap:wrap; gap:8px; }
+  .checks label { background:var(--chip); border-radius:999px; padding:5px 11px;
+                  color:var(--ink); font-size:13px; margin:0; cursor:pointer; }
+  .rows { display:grid; gap:10px; }
+  .row { border:1px solid var(--line); border-radius:9px; padding:12px 13px; background:var(--bg); }
+  .row > .n { font-size:11px; color:var(--muted); margin-bottom:8px; }
+
+  .ask { background:color-mix(in srgb,var(--accent) 8%,var(--panel));
+         border:1px solid color-mix(in srgb,var(--accent) 25%,var(--line)); }
+  .ask ol { margin:0; padding-left:20px; }
+  .ask li { margin-bottom:6px; }
+  .warnbox { border-color: color-mix(in srgb,var(--warn) 35%,var(--line)); }
+  .muted { color: var(--muted); font-size: 13px; }
+  button.primary { background:var(--accent); color:#fff; border:0; border-radius:8px;
+                   padding:9px 16px; font:inherit; cursor:pointer; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ARC 경험 자동 정리</h1>
+  <p class="sub">활동 산출물 파일을 하나 올리면, 유형을 판별해 해당 폼을 만들고 항목까지 채웁니다.</p>
+
+  <div id="drop">
+    <strong>파일을 여기에 끌어다 놓거나 클릭해서 선택</strong>
+    <span>PDF · 이미지 · 워드/한글 · PPT · 엑셀 · 음성 · 영상 · ZIP — 무엇이든</span>
+    <input type="file" id="file" multiple hidden />
+  </div>
+  <input id="hint" placeholder="(선택) 이 활동에 대한 한 줄 설명 — 예: 작년 여름 인턴 때 만든 자료입니다" />
+  <div id="log"></div>
+
+  <div id="out"></div>
+</div>
+
+<script type="module">
+const $ = (s) => document.querySelector(s);
+const drop = $("#drop"), fileInput = $("#file"), log = $("#log"), out = $("#out");
+
+drop.onclick = () => fileInput.click();
+["dragenter", "dragover"].forEach((e) =>
+  drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.add("hot"); }));
+["dragleave", "drop"].forEach((e) =>
+  drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.remove("hot"); }));
+drop.addEventListener("drop", (ev) => upload([...ev.dataTransfer.files]));
+fileInput.onchange = () => upload([...fileInput.files]);
+
+/** 프론트가 들고 있는 폼 상태 — 여기에 자동으로 값이 채워진다 */
+let values = {};
+
+async function upload(files) {
+  if (!files.length) return;
+  out.innerHTML = "";
+  log.textContent = `업로드: ${files.map((f) => f.name).join(", ")}\n정리 중… (파일 크기에 따라 20초~2분)`;
+
+  const fd = new FormData();
+  files.forEach((f) => fd.append("file", f));
+  fd.append("hint", $("#hint").value);
+
+  try {
+    const res = await fetch("/api/organize", { method: "POST", body: fd });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+    log.textContent = "";
+    render(json.form);
+  } catch (e) {
+    log.textContent = `오류: ${e.message}`;
+  }
+}
+
+/* ───────── 렌더링: FormState 하나로 폼이 통째로 만들어진다 ───────── */
+
+function render(form) {
+  values = form.values;                       // ← 이 한 줄로 값 바인딩 끝
+  out.innerHTML = "";
+  out.append(header(form));
+  form.sections.forEach((sec) => out.append(sectionEl(sec)));
+  if (form.questions.length) out.append(askBox(form));
+  if (form.warnings.length) out.append(warnBox(form));
+  out.append(footer(form));
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+function header(form) {
+  const box = el("div");
+  const badges = el("div", "badges");
+  badges.append(el("span", "badge type", `${form.categoryLabel} › ${form.typeLabel}`));
+  badges.append(el("span", "badge", `유형 신뢰도 ${Math.round(form.typeConfidence * 100)}%`));
+  badges.append(el("span", `badge ${form.review.verdict === "approve" ? "ok" : "warn"}`,
+    `검수 ${form.review.verdict === "approve" ? "통과" : "수정됨"} · 충실도 ${form.review.faithfulness}`));
+  badges.append(el("span", "badge", `채움률 ${form.completeness}%`));
+  box.append(badges);
+
+  const rationale = el("p", "muted", form.typeRationale);
+  box.append(rationale);
+
+  const bar = el("div", "bar");
+  const i = el("i"); i.style.width = form.completeness + "%";
+  bar.append(i); box.append(bar);
+
+  if (form.confirmType) {
+    const s = el("section", "ask");
+    s.append(el("h2", null, "유형 확인이 필요합니다"));
+    const body = el("div", "body");
+    body.append(el("p", null, form.confirmType.question));
+    const row = el("div", "checks");
+    form.confirmType.candidates.forEach((c) => row.append(el("label", null, c.label)));
+    body.append(row); s.append(body); box.append(s);
+  }
+  if (form.review.attentionFields.length) {
+    const s = el("section", "warnbox");
+    s.append(el("h2", null, "확인해 보세요"));
+    const body = el("div", "body");
+    form.review.attentionFields.slice(0, 6).forEach((a) =>
+      body.append(el("p", "muted", `· ${a.label} — ${a.detail}`)));
+    s.append(body); box.append(s);
+  }
+  return box;
+}
+
+function sectionEl(sec) {
+  const s = el("section", sec.collapsed ? "collapsed" : "");
+  const h = el("h2", null, sec.title);
+  const t = el("span", "toggle", sec.collapsed ? "펼치기 ▾" : "접기 ▴");
+  h.append(t);
+  h.onclick = () => {
+    s.classList.toggle("collapsed");
+    t.textContent = s.classList.contains("collapsed") ? "펼치기 ▾" : "접기 ▴";
+  };
+  const body = el("div", "body");
+  sec.fields.forEach((f) => body.append(fieldEl(f, f.key)));
+  s.append(h, body);
+  return s;
+}
+
+function labelEl(f) {
+  const l = el("label");
+  l.append(document.createTextNode(f.label));
+  if (f.required) l.append(el("span", "req", "*"));
+  if (f.filled) l.append(el("span", "auto", "자동"));
+  if (f.evidence?.length) {
+    const src = el("span", "src", `출처 ${f.evidence.length}`);
+    src.title = f.evidence.map((e) => `[${e.fileName}] ${e.text}`).join("\n\n");
+    l.append(src);
+  }
+  return l;
+}
+
+function bind(input, path) {
+  input.oninput = () => setPath(values, path, input.value === "" ? null : input.value);
+}
+
+function fieldEl(f, path) {
+  const wrap = el("div", "field" + (f.filled ? "" : " empty"));
+  wrap.append(labelEl(f));
+  const v = getPath(values, path);
+  const ph = f.guide ? f.guide.question : "";
+
+  switch (f.kind) {
+    case "longtext": {
+      const t = el("textarea"); t.value = v ?? ""; t.placeholder = ph;
+      bind(t, path); wrap.append(t); break;
+    }
+    case "date": {
+      const i = el("input"); i.type = "text"; i.value = v ?? "";
+      i.placeholder = ph || "YYYY-MM-DD"; bind(i, path); wrap.append(i); break;
+    }
+    case "daterange": {
+      const box = el("div", "range");
+      const a = el("input"); a.type = "text"; a.placeholder = "시작 YYYY-MM-DD"; a.value = v?.start ?? "";
+      const b = el("input"); b.type = "text"; b.placeholder = "종료"; b.value = v?.end ?? "";
+      a.oninput = () => setPath(values, path + ".start", a.value || null);
+      b.oninput = () => setPath(values, path + ".end", b.value || null);
+      box.append(a, el("span", "muted", "~"), b);
+      if (v?.ongoing) box.append(el("span", "badge", "진행 중"));
+      wrap.append(box); break;
+    }
+    case "select": {
+      const s = el("select");
+      s.append(new Option("선택 안 함", ""));
+      (f.options ?? []).forEach((o) => s.append(new Option(o, o)));
+      s.value = v ?? ""; bind(s, path); wrap.append(s); break;
+    }
+    case "checklist": {
+      const box = el("div", "checks");
+      const picked = new Set(Array.isArray(v) ? v : []);
+      (f.options ?? (Array.isArray(v) ? v : [])).forEach((o) => {
+        const l = el("label");
+        const c = el("input"); c.type = "checkbox"; c.checked = picked.has(o);
+        c.onchange = () => {
+          c.checked ? picked.add(o) : picked.delete(o);
+          setPath(values, path, [...picked]);
+        };
+        l.append(c, document.createTextNode(" " + o));
+        box.append(l);
+      });
+      wrap.append(box); break;
+    }
+    case "tags": {
+      const i = el("input"); i.type = "text";
+      i.value = Array.isArray(v) ? v.join(", ") : "";
+      i.placeholder = ph || "쉼표로 구분";
+      i.oninput = () => setPath(values, path,
+        i.value.split(",").map((x) => x.trim()).filter(Boolean));
+      wrap.append(i); break;
+    }
+    case "repeater": {
+      const rows = el("div", "rows");
+      const list = Array.isArray(v) ? v : [];
+      if (!list.length) {
+        rows.append(el("p", "muted", "자동으로 채운 항목이 없습니다."));
+      }
+      list.forEach((_, i) => {
+        const row = el("div", "row");
+        row.append(el("div", "n", `${i + 1}번째`));
+        (f.itemFields ?? []).forEach((sub) => {
+          const subState = { ...sub };
+          const subPath = `${path}[${i}].${sub.key}`;
+          subState.filled = !isEmpty(getPath(values, subPath));
+          row.append(fieldEl(subState, subPath));
+        });
+        rows.append(row);
+      });
+      wrap.append(rows); break;
+    }
+    default: {
+      const i = el("input"); i.type = "text"; i.value = v ?? ""; i.placeholder = ph;
+      bind(i, path); wrap.append(i);
+    }
+  }
+
+  if (!f.filled && f.guide && f.kind !== "repeater") {
+    wrap.append(el("div", "guide", f.guide.whatToProvide));
+  }
+  return wrap;
+}
+
+function askBox(form) {
+  const s = el("section", "ask");
+  s.append(el("h2", null, "이것만 알려주시면 더 채워집니다"));
+  const body = el("div", "body");
+  const ol = el("ol");
+  form.questions.forEach((q) => ol.append(el("li", null, q)));
+  body.append(ol);
+  if (form.recommendedUploads.length) {
+    body.append(el("p", "muted", "추가로 올리면 좋은 자료: " + form.recommendedUploads.join(", ")));
+  }
+  s.append(body); return s;
+}
+
+function warnBox(form) {
+  const s = el("section", "warnbox");
+  s.append(el("h2", null, "파일 처리 안내"));
+  const body = el("div", "body");
+  form.warnings.forEach((w) => body.append(el("p", "muted", "· " + w)));
+  s.append(body); return s;
+}
+
+function footer(form) {
+  const s = el("section");
+  s.append(el("h2", null, "처리 정보"));
+  const body = el("div", "body");
+  form.meta.files.forEach((f) =>
+    body.append(el("p", "muted",
+      `· ${f.name} (${f.kind}, ${f.chars.toLocaleString()}자, 품질 ${Math.round(f.confidence * 100)}%)`)));
+  body.append(el("p", "muted",
+    `소요 ${(form.meta.elapsedMs / 1000).toFixed(1)}초 · 추정 비용 $${form.meta.estimatedCostUsd.toFixed(4)}`));
+  const btn = el("button", "primary", "최종 값 JSON 보기");
+  btn.onclick = () => {
+    const pre = el("pre", "muted", JSON.stringify(values, null, 2));
+    pre.style.cssText = "overflow-x:auto;background:var(--bg);padding:12px;border-radius:8px";
+    body.append(pre); btn.remove();
+  };
+  body.append(btn);
+  s.append(body); return s;
+}
+
+/* ───────── 경로 유틸 (서버의 util/path.ts와 동일 규칙) ───────── */
+function segs(p) {
+  return p.split(".").map((r) => {
+    const m = /^([^[]+)\[(\d+)\]$/.exec(r);
+    return m ? { k: m[1], i: +m[2] } : { k: r };
+  });
+}
+function getPath(o, p) {
+  let c = o;
+  for (const s of segs(p)) {
+    if (c == null) return undefined;
+    c = c[s.k];
+    if (s.i !== undefined) c = Array.isArray(c) ? c[s.i] : undefined;
+  }
+  return c;
+}
+function setPath(o, p, val) {
+  const ss = segs(p);
+  let c = o;
+  ss.forEach((s, idx) => {
+    const last = idx === ss.length - 1;
+    if (last) {
+      if (s.i === undefined) c[s.k] = val;
+      else { if (!Array.isArray(c[s.k])) c[s.k] = []; c[s.k][s.i] = val; }
+      return;
+    }
+    if (s.i === undefined) { if (typeof c[s.k] !== "object" || c[s.k] == null) c[s.k] = {}; c = c[s.k]; }
+    else { if (!Array.isArray(c[s.k])) c[s.k] = []; if (c[s.k][s.i] == null) c[s.k][s.i] = {}; c = c[s.k][s.i]; }
+  });
+}
+function isEmpty(v) {
+  return v == null || v === "" || (Array.isArray(v) && !v.length);
+}
+
+/* 시작 시 엔진 상태 확인 */
+fetch("/api/health").then((r) => r.json()).then((h) => {
+  log.textContent = h.ok
+    ? `엔진 준비됨 — ${h.provider} / ${h.model}`
+    : `⚠ ${h.message}`;
+}).catch(() => {});
+</script>
+</body>
+</html>
