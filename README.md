@@ -8,18 +8,57 @@
    │
    ├─ ⓪ 수집 / OCR ───── 어떤 형식이든 텍스트로 (PDF·이미지·오피스·한글·음성·영상·압축)
    │
-   ├─ ① 분류 에이전트 ─── 대분류 4종 → 세부 유형 18종 판별
+   ├─ ⓪' 사실 시트 ───── 값싼 모델 1회로 수치·고유명사·날짜를 먼저 추출 (누락 방지)
+   │                     오타·구어도 여기서 한 번 정규화
    │
-   ├─ ② 배분 에이전트 ─── 항목별로 요약해 분배 + 값마다 원문 근거 부착
+   ├─ ① 분류 에이전트 ─── 대분류 4종 → 세부 유형 18종 판별  (사실 시트와 병렬)
+   │
+   ├─ ② 배분 에이전트 ─── 값싼 모델 N회 병렬 → 필드별 우수안 병합(LLM 0회) → 충돌만 중재
    │
    ├─ ③ 감독 sub-Agent ── 원문과 대조 검수 → 환각·오배치·왜곡 적발 → 수정 패치
-   │        ↕ 재작업 루프 (최대 2회)
+   │        ↕ 재작업 루프 (기본 1회)   ※ 원문 전체가 아니라 근거 구간만 본다
    │
    └─ ④ Fallback 안내 ─── 못 채운 칸은 비우고, "무엇을 주면 채워지는지" 질문 생성
 ```
 
+근거 검증은 **RAGKOR**(`src/ragkor/`, `ragkor/`)가 맡습니다 — 한국어 유의어·오타·표기 변형을
+근거로 인정하고, 원문 수치에서 계산된 값을 환각으로 지우지 않습니다.
+자세한 내용은 [RAGKOR 보고서](./docs/RAGKOR-report.md).
+
 **엔진은 Google Gemini입니다. Google API 키 하나만 있으면 됩니다.**
 자세한 사용법은 **[USAGE.md](./USAGE.md)** 를 보세요.
+
+## RAGKOR — 한국어 근거 검증
+
+감독 에이전트가 멀쩡한 인용을 연달아 '환각'으로 찍는 문제가 있었습니다.
+원인은 의미가 아니라 **표기**였습니다 — `정규화(인용) in 정규화(원문)` 이 말줄임표 하나에 무너졌고,
+그 오탐이 재작업 루프를 3회 돌리며 비용과 품질을 동시에 망가뜨렸습니다.
+
+RAGKOR는 그 자리를 대체하는 **규칙 기반 한국어 어휘 자원 + 자모 유사도 매처**입니다.
+신경망을 훈련한 모델이 아니라, 모든 항목이 어느 규칙에서 나왔는지 역추적됩니다.
+
+| | 기존 | RAGKOR |
+|---|---:|---:|
+| 근거 검증 F1 | 0.918 | **1.000** |
+| 정상 인용을 환각으로 오탐 | 21건 / 180 | **0건** |
+| 말줄임표 붙은 인용 | 2/23 | **23/23** |
+| 오타 복원 (사전 미수록) | — | **93.9%** |
+| 유의어·신조어 인식 | — | **100%** |
+
+Python(`ragkor/`)과 TypeScript(`src/ragkor/`) 두 구현이 **같은 시드·같은 알고리즘**을 씁니다.
+시드는 `python tools/gen_seed_ts.py` 로 생성되어 갈라지지 않고,
+`npx tsx test/ragkor.test.ts` 가 개별 점수까지 일치하는지 검증합니다.
+
+```ts
+import { SourceIndex } from "arc-auto-organize/ragkor";
+
+const idx = new SourceIndex([원문]);
+idx.verifyQuote("...");      // { score: 0.97, verdict: "grounded" }
+idx.classifyNumber("22.8");  // "literal" | "derived" | "unknown"
+idx.checkTerm("향상");        // 유의어·오타를 허용하고 원문 존재 여부 판정
+```
+
+자세한 분석은 [docs/RAGKOR-report.md](./docs/RAGKOR-report.md).
 
 ## Colab에서 바로 테스트 (설치 없이)
 
@@ -43,7 +82,15 @@ npm run check             # 키 확인 + 선택된 모델 표시
 
 npm run serve             # → http://localhost:5174  파일을 끌어다 놓으면 폼이 채워집니다
 npm run organize -- ./인턴_최종보고서.pdf --hint "작년 여름 인턴"
-npm test                  # API 키 없이 도는 오프라인 검증 22종
+npm test                  # API 키 없이 도는 오프라인 검증 42종
+npm run ragkor            # RAGKOR 벤치마크 (Python)
+```
+
+품질/비용 조절:
+
+```bash
+npm run organize -- ./보고서.pdf --quality fast      # 앙상블 1회·전부 값싼 모델
+npm run organize -- ./보고서.pdf --quality best      # 배분도 상위 모델
 ```
 
 라이브러리로 쓸 때:
@@ -254,6 +301,8 @@ Next.js 연동 코드와 `FormState` 전체 레퍼런스는 **[USAGE.md](./USAGE
 | `fieldConfidenceFloor` | 0.4 | 미만인 값은 자동으로 비움 |
 | `ocrAgreementFloor` | 0.82 | 엔진 간 일치율이 미만이면 타일 재판독 |
 | `THINKING.supervisor` | `-1`(자동) | 감독만 깊게 — 정확도가 여기서 갈림. `0`이면 빠르고 쌈 |
+| `ensemble` | 2 | 배분 시도 횟수. 값싼 모델 N회 → 필드별 우수안 병합 |
+| `supervisorEvidenceChars` | 9000 | 감독에게 넘기는 근거 구간 상한. 원문 전체를 보내지 않음 |
 
 ## 선택 설치로 얻는 것
 

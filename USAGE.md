@@ -74,6 +74,8 @@ npm run organize -- ./인턴_최종보고서.pdf
 npm run organize -- ./상장.jpg --hint "작년에 받은 상"
 npm run organize -- ./포트폴리오.zip --out result.json
 npm run organize -- ./회고.md --form            # 프론트 바인딩용 JSON만 출력
+npm run organize -- ./보고서.pdf --quality fast  # 싸고 빠르게 (앙상블 1회)
+npm run organize -- ./보고서.pdf --quality best  # 배분도 상위 모델
 npm run organize -- --list-types                # 18종 유형 목록
 ```
 
@@ -128,6 +130,7 @@ export async function POST(req: Request) {
 
   const result = await organizeExperience(files, {
     userHint: String(fd.get("hint") ?? ""),
+    quality: "balanced",   // "fast" | "balanced" | "best"
   });
 
   return Response.json(toFormState(result));
@@ -325,6 +328,9 @@ apt install poppler-utils ffmpeg                          # 스캔 PDF / 영상
 
 - `THINKING.supervisor`를 `-1`(자동)로 두면 감독이 깊게 검토합니다. `0`으로 두면 빨라지고 싸집니다.
 - `PIPELINE.maxSupervisorRounds`를 늘리면 재작업을 더 하지만 느려집니다.
+  RAGKOR로 검증기 오탐이 사라져 기본값이 1로 내려갔습니다.
+- `PIPELINE.ensemble`은 배분 시도 횟수입니다. 값싼 모델 N회를 돌려 필드별로
+  좋은 쪽만 합치므로, 늘려도 상위 모델 1회보다 쌉니다.
 - `PIPELINE.fieldConfidenceFloor`를 올리면 애매한 값을 더 적극적으로 비웁니다.
 
 ## 8. 비용 감각
