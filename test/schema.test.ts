@@ -230,7 +230,7 @@ await test("텍스트·CSV·HTML 수집이 API 호출 없이 동작한다", asyn
 /* ───────── Gemini 스키마 변환 / 프론트 바인딩 ───────── */
 
 const { toGeminiSchema, coerceToSchema } = await import("../src/llm/gemini-schema.js");
-const { pickByPreference } = await import("../src/llm/gemini.js");
+const { pickModel, pickTier } = await import("../src/llm/gemini.js");
 const { toFormState } = await import("../src/form.js");
 
 await test("JSON Schema → Gemini 스키마: 유니온 타입이 nullable로 바뀐다", () => {
@@ -304,16 +304,18 @@ await test("coerce: 응답에 빠진 키를 null로 채워 폼 형태를 고정�
   assert.deepEqual(coerceToSchema({ a: "값" }, schema), { a: "값", b: null });
 });
 
-await test("모델 자동 선택은 최신 세대의 pro를 고른다", () => {
-  const prefer = [
-    /^gemini-(\d+(?:\.\d+)?)-pro$/,
-    /^gemini-(\d+(?:\.\d+)?)-pro-preview/,
-    /^gemini-(\d+(?:\.\d+)?)-flash$/,
-  ];
+await test("모델 자동 선택은 세대를 tier보다 먼저 본다", () => {
   const models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-pro", "gemini-1.5-pro", "embedding-001"];
-  assert.equal(pickByPreference(models, prefer), "gemini-3-pro");
-  assert.equal(pickByPreference(["gemini-2.5-flash", "embedding-001"], prefer), "gemini-2.5-flash");
-  assert.equal(pickByPreference(["embedding-001"], prefer), null);
+  assert.equal(pickModel(models), "gemini-3-pro");
+  assert.equal(pickModel(["gemini-2.5-flash", "embedding-001"]), "gemini-2.5-flash");
+  assert.equal(pickModel(["embedding-001"]), null);
+  // 실제 사용자 계정에서 나온 목록 — 3.8세대 flash가 2.5세대 pro보다 낫다
+  assert.equal(
+    pickModel(["gemini-2.5-pro", "gemini-2.5-flash", "gemini-3.8-flash", "embedding-001"]),
+    "gemini-3.8-flash",
+    "세대를 먼저 보지 않으면 gemini-2.5-pro 가 선택된다",
+  );
+  assert.equal(pickTier(["gemini-2.5-pro", "gemini-3.8-flash"], "flash"), "gemini-3.8-flash");
 });
 
 await test("toFormState가 프론트에 바로 꽂히는 형태를 만든다", () => {

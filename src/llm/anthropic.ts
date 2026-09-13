@@ -53,7 +53,8 @@ export class AnthropicSession implements LlmSession {
       model: MODELS.anthropic.main,
       max_tokens: req.maxTokens ?? 16000,
       thinking: { type: "adaptive" },
-      output_config: { effort: req.stage === "supervise" ? "xhigh" : "high" },
+      // Anthropic 4.6+ 는 temperature를 받지 않습니다. 다양성은 effort로만 조절합니다.
+      output_config: { effort: req.stage === "supervise" ? "xhigh" : req.light ? "medium" : "high" },
       system,
       tools: [
         {

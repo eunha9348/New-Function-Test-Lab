@@ -21,6 +21,10 @@ export interface StructuredRequest {
   /** JSON Schema (이 저장소 표준 형식). 공급자별 형식 변환은 각 구현이 담당. */
   schema: Record<string, unknown>;
   maxTokens?: number;
+  /** 값싼 보조 모델로 처리할지. 무거운 단계를 여기로 옮겨 비용을 줄입니다. */
+  light?: boolean;
+  /** 앙상블에서 서로 다른 결과를 얻기 위한 다양성 조절. */
+  temperature?: number;
 }
 
 /** 엔진(공급자) 공통 인터페이스. 파이프라인은 이 인터페이스만 안다. */
@@ -33,6 +37,8 @@ export interface LlmSession {
   structured<T>(req: StructuredRequest): Promise<T>;
   /** 자유 텍스트 (OCR 등) */
   text(stage: Stage, systemStable: string, content: LlmContent[], maxTokens?: number): Promise<string>;
+  /** 이 단계가 실제로 어느 tier에서 돌았는지 (비용 로그용) */
+  readonly usageByTier?: { pro: number; light: number };
   /** 키·권한이 실제로 유효한지 확인 (실제 API를 한 번 찔러본다) */
   verify(): Promise<{ ok: boolean; detail: string }>;
 }

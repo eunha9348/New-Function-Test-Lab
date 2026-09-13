@@ -102,6 +102,7 @@ export async function supervise(
   draft: ExtractionResult,
   docs: ExtractedDoc[],
   validatorIssues: ReviewIssue[],
+  opts: { evidenceText?: string; factsheet?: string } = {},
 ): Promise<ReviewResult> {
   const fieldList = allFieldsFor(type)
     .map((f) => `- ${f.key} | ${f.label} — ${f.kind}${f.options ? ` 〔${f.options.join("·")}〕` : ""}${f.required ? " (필수)" : ""}`)
@@ -146,7 +147,14 @@ export async function supervise(
     schema: SCHEMA as unknown as Record<string, unknown>,
     maxTokens: 24000,
     content: [
-      { type: "text", text: `## 원문 (근거)\n${buildEvidenceBundle(docs)}` },
+      ...(opts.factsheet
+        ? [{ type: "text" as const, text: `## 원문에서 뽑은 사실 시트\n${opts.factsheet}` }]
+        : []),
+      {
+        type: "text" as const,
+        text: "## 원문 근거 구간 (정리된 값과 관련된 부분만 발췌)\n"
+          + (opts.evidenceText || buildEvidenceBundle(docs)),
+      },
       { type: "text", text: `## 정리 결과 (검수 대상)\n\`\`\`json\n${JSON.stringify(draft.values, null, 2)}\n\`\`\`` },
       { type: "text", text: `## 값별 근거\n${provenanceReport}` },
       { type: "text", text: `## 비워 둔 항목\n${draft.unfilled.map((u) => `· ${u.label} (${u.path}) — ${u.reason}`).join("\n") || "(없음)"}` },

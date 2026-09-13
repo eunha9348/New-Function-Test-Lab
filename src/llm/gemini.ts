@@ -46,8 +46,8 @@ export class GeminiSession implements LlmSession {
           const usable = models
             .filter((m) => (m.supportedGenerationMethods ?? []).includes("generateContent"))
             .map((m) => m.name.replace(/^models\//, ""));
-          const main = pickByPreference(usable, cfg.prefer) ?? cfg.fallback;
-          const light = cfg.lightPin || pickLight(usable) || main;
+          const main = pickModel(usable) ?? cfg.fallback;
+          const light = cfg.lightPin || pickTier(usable, "flash") || main;
           return { main, light };
         } catch {
           // 목록 조회가 막혀 있어도 파이프라인은 계속 돌아야 한다
@@ -90,7 +90,7 @@ export class GeminiSession implements LlmSession {
   /* ───────────────── 호출 ───────────────── */
 
   async structured<T>(req: StructuredRequest): Promise<T> {
-    const model = await this.resolveModel(req.stage);
+    const model = req.light ? await this.resolveModel("guide") : await this.resolveModel(req.stage);
     const schema = toGeminiSchema(req.schema);
     const system = [req.systemStable, req.systemVolatile].filter(Boolean).join("\n\n");
 
@@ -98,7 +98,7 @@ export class GeminiSession implements LlmSession {
       responseMimeType: "application/json",
       responseSchema: schema,
       maxOutputTokens: req.maxTokens ?? 32_768,
-      temperature: 0.1,
+      temperature: req.temperature ?? 0.1,
     });
 
     let parsed: unknown;
@@ -166,7 +166,7 @@ export class GeminiSession implements LlmSession {
       .trim();
 
     const usage = json.usageMetadata ?? {};
-    this.track(stage, Date.now() - started, usage);
+    this.track(stage, Date.now() - started, usage, model);
 
     if (!text) throw new Error(`[${stage}] 빈 응답을 받았습니다 (finishReason=${finish ?? "없음"}).`);
     return text;
@@ -203,15 +203,21 @@ export class GeminiSession implements LlmSession {
     });
   }
 
-  private track(stage: Stage, ms: number, usage: any) {
+  readonly usageByTier = { pro: 0, light: 0 };
+
+  private track(stage: Stage, ms: number, usage: any, model = "") {
     const inp = usage.promptTokenCount ?? 0;
     const out = (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0);
     const cached = usage.cachedContentTokenCount ?? 0;
     this.usage.inputTokens += inp;
     this.usage.outputTokens += out;
     this.usage.cacheReadTokens += cached;
+    // flash 계열은 단가가 크게 낮다 — tier를 구분해야 절감 효과가 숫자로 보인다
+    const rate = /flash/i.test(model) ? PRICING.geminiFlash : PRICING.gemini;
     this.usage.estimatedCostUsd +=
-      (inp / 1e6) * PRICING.gemini.inputPerMTok + (out / 1e6) * PRICING.gemini.outputPerMTok;
+      (inp / 1e6) * rate.inputPerMTok + (out / 1e6) * rate.outputPerMTok;
+    if (/flash/i.test(model)) this.usageByTier.light += inp;
+    else this.usageByTier.pro += inp;
     this.usage.calls.push({ stage, ms });
   }
 }
@@ -235,23 +241,39 @@ function stageToThinkingKey(stage: Stage): keyof typeof THINKING {
   }
 }
 
-/** 우선순위 패턴에 맞는 모델 중 세대 숫자가 가장 큰 것 */
-export function pickByPreference(models: string[], prefer: readonly RegExp[]): string | null {
-  for (const re of prefer) {
-    const hits = models
-      .map((m) => ({ m, g: re.exec(m) }))
-      .filter((x): x is { m: string; g: RegExpExecArray } => x.g !== null)
-      .map((x) => ({ m: x.m, gen: Number(x.g[1]) }))
-      .filter((x) => Number.isFinite(x.gen))
-      .sort((a, b) => b.gen - a.gen || a.m.length - b.m.length);
-    if (hits.length) return hits[0]!.m;
+/**
+ * 세대를 먼저 보고, 같은 세대 안에서 tier를 본다.
+ *
+ * 예전에는 'pro 패턴'을 먼저 훑어서 gemini-3.8-flash 가 있는데도
+ * gemini-2.5-pro 를 골랐다. 세대 차가 tier 차보다 크므로 순서를 뒤집는다.
+ */
+export function pickModel(models: string[]): string | null {
+  const scored: [number, number, number, number, string][] = [];
+  for (const m of models) {
+    const g = MODELS.gemini.pattern.exec(m);
+    if (!g) continue;
+    const gen = Number(g[1]);
+    if (!Number.isFinite(gen)) continue;
+    scored.push([-gen, g[2] === "pro" ? 0 : 1, g[3] ? 1 : 0, m.length, m]);
   }
-  return null;
+  if (!scored.length) return null;
+  scored.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || a[3] - b[3]);
+  return scored[0]![4];
 }
 
-/** 가벼운 단계용 — flash 계열 중 최신 */
-function pickLight(models: string[]): string | null {
-  return pickByPreference(models, [/^gemini-(\d+(?:\.\d+)?)-flash$/, /^gemini-(\d+(?:\.\d+)?)-flash-preview/]);
+/** 특정 tier에서 가장 최신 세대 */
+export function pickTier(models: string[], tier: "pro" | "flash"): string | null {
+  const scored: [number, number, number, string][] = [];
+  for (const m of models) {
+    const g = MODELS.gemini.pattern.exec(m);
+    if (!g || g[2] !== tier) continue;
+    const gen = Number(g[1]);
+    if (!Number.isFinite(gen)) continue;
+    scored.push([-gen, g[3] ? 1 : 0, m.length, m]);
+  }
+  if (!scored.length) return null;
+  scored.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+  return scored[0]![3];
 }
 
 function stripCodeFence(s: string): string {

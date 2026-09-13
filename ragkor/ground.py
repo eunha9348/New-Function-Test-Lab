@@ -37,8 +37,13 @@ class SourceIndex:
         문서 여기저기서 조각을 긁어모아 만든 문장은 점수가 낮게 나온다.
         """
         grams = ngrams(quote, GRAM)
+        folded_quote = fold(quote)
+        # 표 구분선('| :--- |')처럼 정규화하면 아무것도 남지 않는 인용은
+        # 환각은 아니지만 근거로도 쓸 수 없다. 통과시키면 빈 근거가 진짜 근거 행세를 한다.
+        if len(folded_quote) < 4:
+            return 0.0, "내용 없음"
         if not grams:
-            return (1.0, "빈 인용") if not fold(quote) else (0.0, "너무 짧음")
+            return 0.0, "너무 짧음"
         if len(grams) < 3:                       # 아주 짧은 인용은 포함 여부로 족하다
             hit = fold(quote) in self.folded
             return (1.0 if hit else 0.0), ("직접 포함" if hit else "원문에 없음")
@@ -70,7 +75,10 @@ class SourceIndex:
 
     def verify_quote(self, quote: str) -> dict:
         score, where = self.quote_score(quote)
-        if score >= 0.85:
+        # '내용 없음'은 지어낸 것이 아니므로 환각(blocker)으로 올리지 않고 약한 근거로 둔다
+        if where == "내용 없음":
+            verdict = "weak"
+        elif score >= 0.85:
             verdict = "grounded"
         elif score >= 0.55:
             verdict = "weak"

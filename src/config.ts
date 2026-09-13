@@ -56,15 +56,11 @@ export const MODELS = {
     pin: process.env.GEMINI_MODEL ?? "", // <<<<<< (선택) 모델 고정
 
     /**
-     * 자동 선택 우선순위. 앞에 있는 패턴부터 찾아 처음 맞는 모델을 씁니다.
-     * 숫자가 큰 세대를 먼저 보고, 같은 세대면 pro > flash 순.
+     * 자동 선택은 **세대를 tier보다 먼저** 봅니다.
+     * 예전에는 'pro 패턴'을 먼저 훑어서 gemini-3.8-flash 가 있는데도
+     * gemini-2.5-pro 를 골랐습니다. 세대 차가 tier 차보다 크므로 순서를 뒤집었습니다.
      */
-    prefer: [
-      /^gemini-(\d+(?:\.\d+)?)-pro$/,
-      /^gemini-(\d+(?:\.\d+)?)-pro-preview/,
-      /^gemini-(\d+(?:\.\d+)?)-flash$/,
-      /^gemini-(\d+(?:\.\d+)?)-flash-preview/,
-    ],
+    pattern: /^gemini-(\d+(?:\.\d+)?)-(pro|flash)(?:-(preview|exp).*)?$/,
     /** 자동 선택이 실패했을 때 마지막으로 시도할 모델 */
     fallback: "gemini-2.5-pro",
     /** 가벼운 단계(안내 생성 등)에 쓸 모델. 비우면 위와 동일 모델 사용 */
@@ -89,8 +85,19 @@ export const THINKING = {
 } as const;
 
 export const PIPELINE = {
-  /** 감독 sub-Agent 재검수 최대 횟수 */
-  maxSupervisorRounds: 2,
+  /**
+   * 감독 sub-Agent 재검수 최대 횟수.
+   * RAGKOR로 검증기 오탐이 사라져 1회로 충분해졌습니다 (예전 기본 2).
+   */
+  maxSupervisorRounds: 1,
+  /**
+   * 배분 앙상블 시도 횟수.
+   * 값싼 모델로 N번 시도해 필드별로 좋은 쪽만 합치는 편이,
+   * 비싼 모델로 한 번 시도하고 틀려서 재작업하는 것보다 쌉니다.
+   */
+  ensemble: 2,
+  /** 감독에게 넘기는 근거 구간 최대 길이(문자). 원문 전체를 보내지 않습니다. */
+  supervisorEvidenceChars: 9000,
   /** 분류 신뢰도가 이 값 미만이면 사용자에게 유형 확인을 요청 */
   classificationConfidenceFloor: 0.55,
   /** 필드 신뢰도가 이 값 미만이면 값을 비우고 Fallback 안내로 넘김 */
@@ -110,6 +117,8 @@ export const PIPELINE = {
 /** 비용 추정용 단가 (USD / 1M tokens). 모델·요금제에 맞게 조정하세요. */
 export const PRICING = {
   gemini: { inputPerMTok: 1.25, outputPerMTok: 10.0 },
+  /** flash 계열은 훨씬 쌉니다 — 무거운 단계를 여기로 옮겨 비용을 줄입니다. */
+  geminiFlash: { inputPerMTok: 0.3, outputPerMTok: 2.5 },
   anthropic: { inputPerMTok: 5.0, outputPerMTok: 25.0 },
 } as const;
 

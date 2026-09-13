@@ -21,6 +21,8 @@ const HELP = `ARC 경험 자동 정리
   --json              사람이 읽는 요약 대신 전체 JSON 출력
   --form              프론트엔드 바인딩용 FormState JSON만 출력
   --check             API 키와 선택된 모델만 확인하고 종료
+  --quality <모드>    fast | balanced(기본) | best
+                      fast=앙상블 1회·전부 값싼 모델, best=배분도 상위 모델
 
 예시:
   npm run organize -- ./인턴_최종보고서.pdf ./상장.jpg --hint "작년 여름 인턴"
@@ -31,7 +33,9 @@ function parseArgs(argv: string[]) {
   const opts: Record<string, string | boolean> = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
-    if (a === "--out" || a === "--hint" || a === "--type") opts[a.slice(2)] = argv[++i] ?? "";
+    if (a === "--out" || a === "--hint" || a === "--type" || a === "--quality") {
+      opts[a.slice(2)] = argv[++i] ?? "";
+    }
     else if (a.startsWith("--")) opts[a.slice(2)] = true;
     else files.push(a);
   }
@@ -144,6 +148,8 @@ async function main() {
   const result = await organizeExperience(inputs, {
     userHint: typeof opts.hint === "string" ? opts.hint : undefined,
     forceTypeId: typeof opts.type === "string" ? opts.type : undefined,
+    quality: (typeof opts.quality === "string" ? opts.quality : undefined) as
+      "fast" | "balanced" | "best" | undefined,
     onProgress: (e: ProgressEvent) => {
       if (!quiet) console.error(`  [${e.stage}] ${e.message}`);
     },

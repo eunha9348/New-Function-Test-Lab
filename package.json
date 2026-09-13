@@ -7,15 +7,17 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
-    "./schema": "./dist/schema/index.js"
+    "./schema": "./dist/schema/index.js",
+    "./ragkor": "./dist/ragkor/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "organize": "tsx src/cli.ts",
-    "test": "tsx test/schema.test.ts",
+    "test": "tsx test/schema.test.ts && tsx test/ragkor.test.ts",
     "serve": "tsx server/server.ts",
-    "check": "tsx src/cli.ts --check"
+    "check": "tsx src/cli.ts --check",
+    "ragkor": "python3 -m ragkor.bench"
   },
   "optionalDependencies": {
     "sharp": "^0.34.0",

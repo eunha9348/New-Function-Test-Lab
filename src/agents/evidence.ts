@@ -1,5 +1,7 @@
 import { PIPELINE } from "../config.js";
-import type { ExtractedDoc } from "../types.js";
+import { SourceIndex, fold, ngrams } from "../ragkor/index.js";
+import type { ExtractedDoc, FieldValue } from "../types.js";
+import { getByPath, leafPaths } from "../util/path.js";
 
 /**
  * 모델에 넘길 근거 묶음.
@@ -63,4 +65,63 @@ export function buildClassificationDigest(docs: ExtractedDoc[]): string {
     .map((d) => `[${d.sourceId} ${d.name}]\n${d.text.slice(0, 6000)}`)
     .join("\n\n");
   return `[업로드된 파일 목록]\n${list}\n\n[본문 발췌]\n${snippets}`;
+}
+
+
+/**
+ * 감독용 근거 압축 — 전체 문서 대신 '관련 구간'만 보낸다.
+ *
+ * 채워진 값의 근거 주변만 잘라 모은다. 실제 문서에서 감독 입력이 31k → 3k자로 줄었고,
+ * 그만큼 상위 모델 토큰이 빠진다. 비용 절감의 가장 큰 항목이다.
+ */
+export function evidenceSpans(
+  docs: ExtractedDoc[],
+  values: Record<string, unknown>,
+  provenance: FieldValue[],
+  idx: SourceIndex,
+  budget: number = PIPELINE.supervisorEvidenceChars,
+): string {
+  const raw = docs.map((d) => d.text).join("\n");
+  const picked: [number, number][] = [];
+  const ratio = raw.length / Math.max(1, idx.folded.length);
+
+  const mark = (needle: string, pad = 260) => {
+    const f = fold(needle);
+    if (f.length < 6) return;
+    let pos = idx.folded.indexOf(f.slice(0, 60));
+    if (pos < 0) {
+      for (const g of ngrams(needle, 4).slice(0, 12)) {
+        const hit = idx.postings.get(g);
+        if (hit?.length) { pos = hit[0]!; break; }
+      }
+    }
+    if (pos < 0) return;
+    const c = Math.floor(pos * ratio);
+    picked.push([Math.max(0, c - pad), Math.min(raw.length, c + needle.length + pad)]);
+  };
+
+  for (const p of provenance) for (const q of p.quotes) mark(q.text);
+  for (const path of leafPaths(values).slice(0, 120)) {
+    const v = getByPath(values, path);
+    if (typeof v === "string" && v.length > 12) mark(v, 180);
+  }
+
+  if (!picked.length) return raw.slice(0, budget);
+  picked.sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const [a, b] of picked) {
+    const last = merged[merged.length - 1];
+    if (last && a <= last[1] + 120) last[1] = Math.max(last[1], b);
+    else merged.push([a, b]);
+  }
+
+  const out: string[] = [];
+  let total = 0;
+  for (const [a, b] of merged) {
+    let chunk = raw.slice(a, b);
+    if (total + chunk.length > budget) chunk = chunk.slice(0, Math.max(0, budget - total));
+    if (chunk) { out.push(chunk); total += chunk.length; }
+    if (total >= budget) break;
+  }
+  return out.join("…\n");
 }

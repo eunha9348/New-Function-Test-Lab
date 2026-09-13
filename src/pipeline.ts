@@ -1,8 +1,12 @@
 import { PIPELINE } from "./config.js";
 import { classify } from "./agents/classifier.js";
+import { evidenceSpans } from "./agents/evidence.js";
 import { extract } from "./agents/extractor.js";
+import { buildFactsheet, factsheetText, type Factsheet } from "./agents/factsheet.js";
 import { buildFallbackGuide } from "./agents/guide.js";
+import { arbitrate, mergeDrafts } from "./agents/merge.js";
 import { supervise } from "./agents/supervisor.js";
+import { SourceIndex } from "./ragkor/index.js";
 import { ingestFiles } from "./ingest/index.js";
 import { createSession, type LlmSession } from "./llm/index.js";
 import { CATEGORIES, EXPERIENCE_TYPES, TYPE_BY_ID, resolveLayout } from "./schema/index.js";
@@ -21,16 +25,26 @@ export interface OrganizeOptions {
   forceTypeId?: string;
   onProgress?: ProgressHandler;
   session?: LlmSession;
+  /**
+   * 품질/비용 프리셋.
+   *   "fast"     — 앙상블 1회, 전부 값싼 모델
+   *   "balanced" — 기본. 값싼 모델 2회 병렬 + 상위 모델 감독
+   *   "best"     — 배분도 상위 모델
+   */
+  quality?: "fast" | "balanced" | "best";
 }
 
 /**
  * 산출물 파일 → 정리된 ARC 경험 항목.
  *
- *   수집/OCR ──▶ ① 분류(대분류→유형) ──▶ ② 배분(항목별 요약) ──▶ ③ 감독(검수·수정)
- *                                              ▲                        │
- *                                              └──── 재작업 지시 ◀───────┘
- *                                                                       │
- *                                                          ④ Fallback 안내 ◀┘
+ * ┌ 수집/OCR ─ 사실 시트 ─ 분류 ─┬ 배분 A ┐
+ * │                             └ 배분 B ┘→ 결정론적 병합 → (충돌만) 중재
+ * └───────────────────────────────────────→ 감독(근거 구간만) → 안내
+ *
+ * 비용 설계
+ *   · 무거운 단계(배분)는 **값싼 모델로 병렬 N회**, 필드별로 좋은 쪽만 골라 합친다.
+ *   · 감독만 상위 모델을 쓰되, 원문 전체가 아니라 **관련 근거 구간**만 본다.
+ *   · RAGKOR로 검증기 오탐이 사라져 재작업 루프가 3회 → 1회로 줄었다.
  */
 export async function organizeExperience(
   files: InputFile[],
@@ -48,7 +62,15 @@ export async function organizeExperience(
     );
   }
 
-  /* ── 1. 분류 ───────────────────────────────────── */
+  const index = new SourceIndex(docs.map((d) => d.text));
+  const quality = options.quality ?? "balanced";
+  const heavyExtract = quality === "best";
+  const ensemble = quality === "fast" ? 1 : PIPELINE.ensemble;
+
+  /* ── 1. 사실 시트 + 분류를 병렬로 ────────────────── */
+  onProgress?.({ stage: "extract", message: "사실 시트 작성 + 유형 판별 (병렬)" });
+  let factsheet: Factsheet | null = null;
+
   let classification;
   if (options.forceTypeId && TYPE_BY_ID.has(options.forceTypeId)) {
     const t = TYPE_BY_ID.get(options.forceTypeId)!;
@@ -62,12 +84,31 @@ export async function organizeExperience(
       splitSuggestions: [],
     };
   } else {
-    onProgress?.({ stage: "classify", message: "경험 유형 판별 중" });
-    classification = await classify(session, docs, options.userHint);
+    const [fsResult, clsResult] = await Promise.allSettled([
+      buildFactsheet(session, docs),
+      classify(session, docs, options.userHint),
+    ]);
+    if (fsResult.status === "fulfilled") factsheet = fsResult.value;
+    else onProgress?.({ stage: "extract", message: `사실 시트 실패 — 원문만으로 진행합니다` });
+    if (clsResult.status === "rejected") throw clsResult.reason;
+    classification = clsResult.value;
     onProgress?.({
       stage: "classify",
       message: `유형 판별: ${TYPE_BY_ID.get(classification.typeId)?.label ?? classification.typeId} (신뢰도 ${(classification.confidence * 100).toFixed(0)}%)`,
       detail: classification,
+    });
+  }
+
+  if (options.forceTypeId && TYPE_BY_ID.has(options.forceTypeId)) {
+    factsheet = await buildFactsheet(session, docs).catch(() => null);
+  }
+  const fsText = factsheetText(factsheet);
+  if (factsheet) {
+    onProgress?.({
+      stage: "extract",
+      message: `사실 시트: ${factsheet.docType}·${factsheet.register} / `
+        + `수치 ${factsheet.numbers?.length ?? 0}건 · 성과 ${factsheet.achievements?.length ?? 0}건 `
+        + `· 표기 정규화 ${factsheet.normalized?.length ?? 0}건`,
     });
   }
 
@@ -86,19 +127,56 @@ export async function organizeExperience(
     rounds = round + 1;
 
     if (!draft || feedback) {
-      onProgress?.({
-        stage: "extract",
-        message: round === 0 ? "항목별 배분 중" : `재작업 중 (${round + 1}회차)`,
-      });
-      draft = await extract(session, type, docs, { userHint: options.userHint, feedback });
+      if (ensemble > 1 && !feedback) {
+        onProgress?.({ stage: "extract", message: `값싼 모델 ${ensemble}회 병렬 배분` });
+        const temps = [0.05, 0.35, 0.6].slice(0, ensemble);
+        const settled = await Promise.allSettled(temps.map((temperature) =>
+          extract(session, type!, docs, {
+            userHint: options.userHint, factsheet: fsText,
+            temperature, light: !heavyExtract,
+          })));
+        const drafts = settled
+          .filter((r): r is PromiseFulfilledResult<ExtractionResult> => r.status === "fulfilled")
+          .map((r) => r.value);
+        if (!drafts.length) throw (settled[0] as PromiseRejectedResult).reason;
+
+        if (drafts.length === 1) {
+          draft = drafts[0]!;
+        } else {
+          const { result, conflicts } = mergeDrafts(type, drafts, index);
+          draft = result;
+          onProgress?.({
+            stage: "extract",
+            message: `필드별 우수안 선택 · 충돌 ${conflicts.length}건`,
+          });
+          if (conflicts.length) {
+            const fixed = await arbitrate(session, conflicts, fsText).catch(() => ({}));
+            for (const [k, v] of Object.entries(fixed)) draft.values[k] = v;
+            onProgress?.({ stage: "extract", message: `충돌 중재 ${Object.keys(fixed).length}건 확정` });
+          }
+        }
+      } else {
+        onProgress?.({
+          stage: "extract",
+          message: feedback ? `재작업 중 (${round + 1}회차)` : "항목별 배분 중",
+        });
+        draft = await extract(session, type, docs, {
+          userHint: options.userHint, feedback, factsheet: fsText, light: !heavyExtract,
+        });
+      }
       feedback = undefined;
     }
 
-    onProgress?.({ stage: "validate", message: "형식·근거 기계 검증" });
-    const validatorIssues = runValidators(type, draft, docs);
+    onProgress?.({ stage: "validate", message: "형식·근거 기계 검증 (RAGKOR)" });
+    const validatorIssues = runValidators(type, draft, docs, index);
 
-    onProgress?.({ stage: "supervise", message: `감독 검수 (${round + 1}회차)` });
-    const review = await supervise(session, type, draft, docs, validatorIssues);
+    const spans = evidenceSpans(docs, draft.values, draft.provenance, index);
+    onProgress?.({
+      stage: "supervise",
+      message: `감독 검수 (${round + 1}회차) · 근거 ${spans.length.toLocaleString()}자로 압축`,
+    });
+    const review = await supervise(session, type, draft, docs, validatorIssues,
+      { evidenceText: spans, factsheet: fsText });
     history.push(review);
     final = review;
     onProgress?.({
@@ -168,7 +246,7 @@ export async function organizeExperience(
   if (!draft || !final) throw new Error("정리에 실패했습니다.");
 
   /* 패치 적용 후 형식 재검증 — 감독이 고치다 형식을 깨뜨렸을 수 있다 */
-  const postIssues = runValidators(type, draft, docs);
+  const postIssues = runValidators(type, draft, docs, index);
   final = {
     ...final,
     issues: mergeIssues(final.issues, postIssues),
@@ -196,6 +274,7 @@ export async function organizeExperience(
     provenance: draft.provenance,
     review: { rounds, final, history },
     fallback,
+    factsheet,
     ingest: {
       docs: docs.map((d) => ({
         sourceId: d.sourceId,
@@ -214,10 +293,11 @@ function runValidators(
   type: ExperienceTypeSpec,
   draft: ExtractionResult,
   docs: Parameters<typeof checkGrounding>[3],
+  index?: SourceIndex,
 ): ReviewIssue[] {
   return [
     ...validateStructure(type, draft.values),
-    ...checkGrounding(type, draft.values, draft.provenance, docs),
+    ...checkGrounding(type, draft.values, draft.provenance, docs, index),
   ];
 }
 

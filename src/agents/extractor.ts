@@ -30,7 +30,23 @@ const RULES = `당신은 ARC 경험 기록 서비스의 **2단계 배분 에이�
 11. 텍스트 품질이 '낮음'인 문서에서만 나온 값은 confidence를 0.5 이하로 준다.
     OCR 결과의 «불명» 표시 주변 값은 신뢰하지 않는다.
 12. unfilled에는 비워 둔 항목을 **왜** 비웠는지와 함께 모두 적는다. 이건 다음 단계에서
-    사용자에게 "무엇을 더 주면 채울 수 있는지" 안내하는 재료가 된다.`;
+    사용자에게 "무엇을 더 주면 채울 수 있는지" 안내하는 재료가 된다.
+
+── 성과·결과를 제대로 뽑는 법 (여기서 가장 많이 실패한다) ──
+13. '사실 시트'의 수치 목록을 **한 줄씩 훑으면서** 성과 항목에 옮겨 담는다.
+    before→after가 있으면 반드시 둘 다 쓴다. (예: "응답시간 820ms → 210ms")
+    원문 수치에서 계산된 값(차이·증감율)은 써도 된다. 단 계산 근거가 원문에 있어야 한다.
+14. 성과는 **행동이 아니라 변화**다.
+    나쁜 예: "Redis 캐시를 적용했다"          ← 이건 '내가 한 행동'이다
+    좋은 예: "Redis 캐시 적용으로 평균 응답시간을 820ms에서 210ms로 줄였다"
+15. 수치가 전혀 없는 문서라면 **질적 성과**라도 구체적으로 쓴다.
+    나쁜 예: "시스템을 성공적으로 구축했다"
+    좋은 예: "7개 계층과 감독 에이전트로 역할을 분리해, 검증 규칙을 29종까지 확장했다"
+16. 원문이 메모·일기·구어체여도 성과를 찾아낸다.
+    "개꿀", "줄임", "나름 임팩트 있었던 듯" 같은 표현 뒤에 숨은 사실을 문서어로 옮긴다.
+    단 원문에 없는 수치나 평가를 보태지 않는다.
+17. 오타·비문이 있으면 맥락으로 의미를 복원해서 이해하되,
+    인용(quote)에는 **원문 표기를 그대로** 옮긴다. 고쳐서 인용하지 않는다.`;
 
 function fieldOutline(type: ExperienceTypeSpec): string {
   const { layout } = resolveLayout(type);
@@ -52,7 +68,16 @@ export async function extract(
   session: LlmSession,
   type: ExperienceTypeSpec,
   docs: ExtractedDoc[],
-  opts: { userHint?: string; feedback?: string } = {},
+  opts: {
+    userHint?: string;
+    feedback?: string;
+    /** 사실 시트 — 수치·고유명사 누락을 막는다 */
+    factsheet?: string;
+    /** 앙상블에서 서로 다른 결과를 얻기 위한 다양성 */
+    temperature?: number;
+    /** 값싼 보조 모델로 돌릴지 */
+    light?: boolean;
+  } = {},
 ): Promise<ExtractionResult> {
   const fields = allFieldsFor(type);
   const schema = extractionToolSchema(fields);
@@ -84,8 +109,20 @@ export async function extract(
     toolName: "submit_experience",
     toolDescription: "정리한 경험 항목과 근거를 제출한다.",
     schema,
-    content: [{ type: "text", text: buildEvidenceBundle(docs) }],
+    content: [
+      ...(opts.factsheet
+        ? [{
+            type: "text" as const,
+            text: "## 원문에서 미리 뽑아 둔 사실 시트 "
+              + "(수치·고유명사 누락을 막기 위한 것. 여기 있는 값은 원문 근거가 있다)\n"
+              + opts.factsheet,
+          }]
+        : []),
+      { type: "text" as const, text: `## 원문\n${buildEvidenceBundle(docs)}` },
+    ],
     maxTokens: 32000,
+    light: opts.light ?? true,
+    temperature: opts.temperature,
   });
 
   return normalize(raw, type, fields);

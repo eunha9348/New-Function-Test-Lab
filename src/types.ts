@@ -232,6 +232,8 @@ export interface OrganizeResult {
     history: ReviewResult[];
   };
   fallback: FallbackGuide;
+  /** 원문에서 먼저 뽑아 둔 사실 시트 (수치·고유명사 누락 방지용) */
+  factsheet?: unknown;
   ingest: {
     docs: {
       sourceId: string;

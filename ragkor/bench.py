@@ -79,15 +79,19 @@ def build_eval() -> List[dict]:
     cases: List[dict] = []
     rng = random.Random(42)
 
+    # 표 구분선('| :--- |')처럼 정규화하면 내용이 남지 않는 줄은 문장이 아니므로 제외한다
+    def is_sentence(line: str) -> bool:
+        return len(line.strip()) >= 15 and len(fold(line)) >= 8
+
     for name, doc in DOCS.items():
-        lines = [l.strip() for l in doc.split("\n") if len(l.strip()) >= 15]
+        lines = [l.strip() for l in doc.split("\n") if is_sentence(l)]
         idx = SourceIndex([doc])
         for line in lines:
             for kind, q in _variants(line):
                 cases.append({"doc": name, "kind": kind, "quote": q, "truth": True, "index": idx})
         # 진짜 환각 — 다른 문서의 문장, 그럴듯한 창작, 조각 긁어모으기
-        others = [l for other, d in DOCS.items() if other != name
-                  for l in d.split("\n") if len(l.strip()) >= 15]
+        others = [l.strip() for other, d in DOCS.items() if other != name
+                  for l in d.split("\n") if is_sentence(l)]
         for l in rng.sample(others, min(6, len(others))):
             cases.append({"doc": name, "kind": "타 문서 문장", "quote": l.strip(),
                           "truth": False, "index": idx})
@@ -194,6 +198,22 @@ def run_synonym() -> dict:
                             or lex.canonical(a) in lex.expand(b))]}
 
 
+def run_known_limits() -> dict:
+    """알려진 미탐 유형을 일부러 측정한다.
+
+    RAGKOR는 '이 표현이 원문 어딘가에 있는가'만 본다. 원문 문장을 그대로 가져와
+    **엉뚱한 항목에 붙인 경우**는 통과한다 — 설계상 그렇고, 숨기지 않고 수치로 남긴다.
+    이건 감독 에이전트가 잡아야 할 몫이다.
+    """
+    idx = SourceIndex([DOCS["기술문서"]])
+    # 원문의 '한계' 섹션 문장을 '성과' 근거로 붙인 경우 — 문자열은 진짜다
+    misplaced = "재OCR을 통한 원문 복원을 포기했다"
+    r = idx.verify_quote(misplaced)
+    return {"유형": "맥락 오배치 (원문 문장을 엉뚱한 항목에 붙임)",
+            "인용": misplaced, "판정": r["verdict"], "점수": r["score"],
+            "잡히는가": r["verdict"] == "ungrounded"}
+
+
 def run_number() -> dict:
     idx = SourceIndex([DOCS["기술문서"]])
     cases = [("18,799", "literal"), ("18799", "literal"), ("62", "literal"),
@@ -238,12 +258,19 @@ def main():
     if sy["실패"]:
         print(f"  실패: {', '.join(sy['실패'])}")
 
-    print("\n[4] 수치 근거 판정 (원문값 / 파생값 / 근거없음)")
+    print("\n[4] 알려진 미탐 유형 (설계상의 한계)")
+    kl = run_known_limits()
+    print(f"  {kl['유형']}")
+    print(f"    \"{kl['인용']}\" → {kl['판정']} ({kl['점수']}) · "
+          f"{'잡힘' if kl['잡히는가'] else '통과함 — 감독 에이전트가 잡아야 하는 몫'}")
+
+    print("\n[5] 수치 근거 판정 (원문값 / 파생값 / 근거없음)")
     n = run_number()
     print(f"  {n['케이스']}건 중 {n['정확']}건 정확 → {n['정확도']:.3f}")
     print(f"  {n['판정']}")
     print()
-    return {"lexicon": lex.entries, "grounding": g, "typo": t, "synonym": sy, "number": n}
+    return {"lexicon": lex.entries, "grounding": g, "typo": t, "synonym": sy,
+            "number": n, "known_limits": kl}
 
 
 if __name__ == "__main__":

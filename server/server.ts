@@ -43,7 +43,9 @@ function json(res: ServerResponse, status: number, body: unknown) {
 }
 
 /** node:http 요청을 표준 Request로 바꿔 multipart를 그대로 파싱한다 (추가 라이브러리 불필요) */
-async function readUpload(req: IncomingMessage): Promise<{ files: InputFile[]; hint: string; typeId: string }> {
+async function readUpload(req: IncomingMessage): Promise<{
+  files: InputFile[]; hint: string; typeId: string; quality: string;
+}> {
   const request = new Request("http://localhost/api/organize", {
     method: "POST",
     headers: req.headers as Record<string, string>,
@@ -70,6 +72,7 @@ async function readUpload(req: IncomingMessage): Promise<{ files: InputFile[]; h
     files,
     hint: String(form.get("hint") ?? ""),
     typeId: String(form.get("typeId") ?? ""),
+    quality: String(form.get("quality") ?? ""),
   };
 }
 
@@ -138,7 +141,7 @@ const server = createServer(async (req, res) => {
 
   if (url.pathname === "/api/organize" && req.method === "POST") {
     try {
-      const { files, hint, typeId } = await readUpload(req);
+      const { files, hint, typeId, quality } = await readUpload(req);
       if (!files.length) {
         json(res, 400, { error: "파일이 없습니다. form-data의 'file' 필드로 보내주세요." });
         return;
@@ -146,6 +149,7 @@ const server = createServer(async (req, res) => {
       const result = await organizeExperience(files, {
         userHint: hint || undefined,
         forceTypeId: typeId || undefined,
+        quality: (quality || undefined) as "fast" | "balanced" | "best" | undefined,
         onProgress: (e) => console.log(`  [${e.stage}] ${e.message}`),
       });
       json(res, 200, { form: toFormState(result), raw: result });

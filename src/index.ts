@@ -8,6 +8,13 @@ export { organizeExperience, type OrganizeOptions } from "./pipeline.js";
 export { createSession, GeminiSession, type LlmSession } from "./llm/index.js";
 export { ingestFiles } from "./ingest/index.js";
 export { ocrImage } from "./ocr/index.js";
+export {
+  SourceIndex, Lexicon, BM25, buildLexicon, defaultLexicon,
+  decompose, similarity, typoVariants, fold, tokenize, normalizeNumber,
+  type LexiconData, type QuoteCheck, type NumberKind,
+} from "./ragkor/index.js";
+export { buildFactsheet, factsheetText, type Factsheet } from "./agents/factsheet.js";
+export { mergeDrafts, arbitrate, type FieldConflict } from "./agents/merge.js";
 export * from "./schema/index.js";
 export * from "./types.js";
 export { readInputFiles } from "./read-files.js";
