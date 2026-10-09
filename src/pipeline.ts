@@ -322,6 +322,7 @@ export async function organizeExperience(
     review: { rounds, final, history },
     fallback,
     audit: audited.report,
+    sources: docs.map((d) => ({ sourceId: d.sourceId, name: d.name, text: d.text })),
     factsheet,
     ingest: {
       docs: docs.map((d) => ({

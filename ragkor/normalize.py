@@ -127,9 +127,17 @@ def normalize_number(raw: str) -> str:
     return str(int(value)) if value == int(value) else str(value)
 
 
+_DATE_LIKE = re.compile(r"((?:19|20)\d{2})\s*[.\-/년]\s*(\d{1,2})(?:\s*[.\-/월]\s*(\d{1,2}))?")
+
+
 def numbers_in(text: str) -> Set[str]:
     """텍스트 안의 모든 수치를 정규화해서 모은다 (단위 표기 변형 포함)."""
     out: Set[str] = set()
+    # '2024.06.24' '2024-06-24' '2024년 6월' 같은 날짜는 소수(2024.06)로 읽히지 않게 연·월·일로 나눠 넣는다
+    for d in _DATE_LIKE.finditer(text or ""):
+        for part in d.groups():
+            if part:
+                out.add(normalize_number(part))
     for m in re.finditer(r"(\d[\d,]*(?:\.\d+)?)\s*([천만억조])?", text or ""):
         out.add(normalize_number(m.group(1) + (m.group(2) or "")))
         out.add(normalize_number(m.group(1)))

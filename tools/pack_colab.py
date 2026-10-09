@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-TARGET = ROOT / "colab" / "arc_colab.py"
+TARGET = ROOT / "tools" / "legacy" / "py_pipeline.py"
 START = "# <<<RAGKOR_EMBED_START>>>"
 END = "# <<<RAGKOR_EMBED_END>>>"
 

@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-spec = importlib.util.spec_from_file_location("arc", ROOT / "colab" / "arc_colab.py")
+spec = importlib.util.spec_from_file_location("arc", ROOT / "tools" / "legacy" / "py_pipeline.py")
 arc = importlib.util.module_from_spec(spec)
 arc.__name__ = "arc"
 sys.modules["arc"] = arc

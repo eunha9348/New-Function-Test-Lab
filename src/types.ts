@@ -246,6 +246,8 @@ export interface OrganizeResult {
   fallback: FallbackGuide;
   /** 최종 필드 감사관의 칸별 판정 — 어느 칸이 확인됐고, 무엇을 고쳤고, 무엇이 남았는지 */
   audit?: import("./agents/auditor.js").AuditReport;
+  /** 원문 텍스트 — 근거 인용의 start/end가 가리키는 대상 (보고서 하이라이트용) */
+  sources?: { sourceId: string; name: string; text: string }[];
   /** 원문에서 먼저 뽑아 둔 사실 시트 (수치·고유명사 누락 방지용) */
   factsheet?: unknown;
   ingest: {

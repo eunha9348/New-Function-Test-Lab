@@ -94,21 +94,17 @@ idx.checkTerm("향상");        // 유의어·오타를 허용하고 원문 존�
 
 자세한 분석은 [docs/RAGKOR-report.md](./docs/RAGKOR-report.md).
 
-## Colab에서 바로 테스트 (설치 없이)
+## Colab에서 바로 테스트 (PC 없이, 아이패드·휴대폰 브라우저로)
 
-Python 단일 파일 포팅본이 `colab/arc_colab.py`에 있습니다. Colab 셀에 이 3줄만 붙여넣으면 됩니다.
+**[▶ Colab에서 열기](https://colab.research.google.com/github/eunha9348/New-Function-Test-Lab/blob/claude/arc-service-awareness-z00hjs/colab/ARC_engine.ipynb)**
 
-```python
-import os; os.environ["GOOGLE_API_KEY"] = "AIza...여기에_키"   # ← 키만 바꾸세요
-!wget -q -O arc.py https://raw.githubusercontent.com/eunha9348/New-Function-Test-Lab/refs/heads/claude/arc-activity-auto-organize-lu2y8e/colab/arc_colab.py
-%run arc.py
-```
+1. 위 링크를 열고, 왼쪽 **🔑 보안 비밀**에 `GOOGLE_API_KEY`를 등록합니다 (노트북 액세스 켜기).
+2. 첫 셀의 ▶ 를 누르고, 업로드 창이 뜨면 파일을 고릅니다.
+3. 칸별 감사 결과와 원문 하이라이트가 담긴 보고서가 출력창에 나옵니다.
 
-파일 업로드 창이 뜨고, 올리면 유형 판별 → 폼 생성 → 값 채움까지 출력창에 그려집니다.
-API 키 없이 실행하면 스키마·검증기 무결성 자체 점검(37종)만 돌고 끝납니다.
-
-> Colab 판에는 RAGKOR(정렬·수치 판정 개선 포함, `kiwipiepy`가 있으면 Kiwi도)까지 반영돼 있습니다.
-> 맥락 검사와 최종 필드 감사관은 아직 TypeScript 엔진에만 있습니다.
+이 노트북은 **이 저장소의 엔진(`src/`)을 그대로** 설치해서 돌립니다. 따로 옮겨 적은 판이 아니라서
+여기서 보는 결과가 곧 실제 엔진의 결과입니다. 처음 실행은 설치 때문에 2~3분 걸립니다.
+(예전 Python 포팅본은 `tools/legacy/`로 옮겼고 더 이상 쓰지 않습니다.)
 
 ## 빠른 시작
 

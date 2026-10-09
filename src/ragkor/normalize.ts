@@ -118,9 +118,15 @@ export function ruleNormalize(token: string): string {
   return stem(stripParticle(token));
 }
 
+const DATE_LIKE = /((?:19|20)\d{2})\s*[.\-/년]\s*(\d{1,2})(?:\s*[.\-/월]\s*(\d{1,2}))?/g;
+
 /** 텍스트 안의 모든 수치를 정규화해서 모은다 (단위 표기 변형 포함). */
 export function numbersIn(text: string): Set<string> {
   const out = new Set<string>();
+  // '2024.06.24' '2024-06-24' '2024년 6월' 같은 날짜는 소수(2024.06)로 읽히지 않게 연·월·일로 나눠 넣는다
+  for (const d of (text ?? "").matchAll(DATE_LIKE)) {
+    for (const part of [d[1], d[2], d[3]]) if (part) out.add(normalizeNumber(part));
+  }
   const re = /(\d[\d,]*(?:\.\d+)?)\s*([천만억조])?/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text ?? "")) !== null) {

@@ -2,6 +2,7 @@
 import { promises as fs } from "node:fs";
 import { createSession } from "./llm/index.js";
 import { toFormState } from "./form.js";
+import { renderReport } from "./report/html.js";
 import { organizeExperience } from "./pipeline.js";
 import { readInputFiles } from "./read-files.js";
 import { EXPERIENCE_TYPES } from "./schema/index.js";
@@ -15,6 +16,7 @@ const HELP = `ARC 경험 자동 정리
 
 옵션:
   --out <경로>        결과 JSON 저장 경로
+  --html <경로>       칸별 감사 결과·원문 하이라이트가 담긴 HTML 보고서 저장
   --hint "<설명>"     활동에 대한 추가 설명
   --type <유형id>     유형을 직접 지정 (분류 단계 생략)
   --list-types        18종 유형 목록 출력
@@ -33,7 +35,7 @@ function parseArgs(argv: string[]) {
   const opts: Record<string, string | boolean> = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
-    if (a === "--out" || a === "--hint" || a === "--type" || a === "--quality") {
+    if (a === "--out" || a === "--html" || a === "--hint" || a === "--type" || a === "--quality") {
       opts[a.slice(2)] = argv[++i] ?? "";
     }
     else if (a.startsWith("--")) opts[a.slice(2)] = true;
@@ -166,6 +168,10 @@ async function main() {
     },
   });
 
+  if (typeof opts.html === "string" && opts.html) {
+    await fs.writeFile(opts.html, renderReport(result), "utf-8");
+    if (!quiet) console.error(`  보고서 저장: ${opts.html}`);
+  }
   if (typeof opts.out === "string" && opts.out) {
     await fs.writeFile(opts.out, JSON.stringify(result, null, 2), "utf-8");
     if (!quiet) console.error(`  결과 저장: ${opts.out}`);

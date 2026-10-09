@@ -161,7 +161,7 @@ LLM 감사관의 실제 정확도는 아직 재지 못했습니다(이 환경에
 python -m ragkor.build_lexicon   # 사전 생성
 python -m ragkor.bench           # Python 벤치마크
 python tools/cost_sim.py         # 비용 시뮬레이션
-python colab/arc_colab.py        # Colab 테스트본 자체 점검 37종
+python tools/legacy/py_pipeline.py  # (동결본) 자체 점검 37종 — 비용 시뮬레이션용
 
 npm test                         # TS 테스트 76종 (스키마 22 + RAGKOR 20 + 정렬 7 + Kiwi 6 + 감사관 21)
 npm run kiwi:model               # Kiwi 모델 받기 (Kiwi 테스트는 모델이 없으면 건너뜀)

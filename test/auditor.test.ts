@@ -49,6 +49,8 @@ function gold(): ExtractionResult {
   return {
     values: {
       companyName: "주식회사 라온테크",
+      // 원문은 '2024.06.24' — 점으로 적힌 날짜를 소수로 읽어 '원문에 없는 수치'로 찍던 회귀를 막는다
+      employmentPeriod: { start: "2024-06-24", end: "2024-08-30", ongoing: false },
       position: "백엔드 엔지니어링 인턴",
       jobFunction: "백엔드 엔지니어링",
       team: "플랫폼개발팀",
@@ -72,6 +74,7 @@ function gold(): ExtractionResult {
     },
     provenance: [
       prov("companyName", "회사: 주식회사 라온테크"),
+      prov("employmentPeriod", "기간: 2024.06.24 ~ 2024.08.30"),
       prov("position", "직무: 백엔드 엔지니어링 인턴"),
       prov("jobFunction", "직무: 백엔드 엔지니어링 인턴"),
       prov("team", "소속: 플랫폼개발팀"),
