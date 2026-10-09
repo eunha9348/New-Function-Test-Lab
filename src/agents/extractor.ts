@@ -1,5 +1,8 @@
 import { PIPELINE } from "../config.js";
-import { allFieldsFor, extractionToolSchema, labelForPath, resolveLayout } from "../schema/index.js";
+import {
+  ROLE_CONTRACTS, allFieldsFor, extractionToolSchema, labelForPath, resolveLayout, roleLegend, roleOf,
+  type FieldRole,
+} from "../schema/index.js";
 import type {
   ExperienceTypeSpec, ExtractedDoc, ExtractionResult, FieldSpec, FieldValue,
 } from "../types.js";
@@ -48,6 +51,17 @@ const RULES = `당신은 ARC 경험 기록 서비스의 **2단계 배분 에이�
 17. 오타·비문이 있으면 맥락으로 의미를 복원해서 이해하되,
     인용(quote)에는 **원문 표기를 그대로** 옮긴다. 고쳐서 인용하지 않는다.`;
 
+/** 이 유형에 실제로 나오는 역할만 범례에 넣는다 */
+export function rolesIn(type: ExperienceTypeSpec): Set<FieldRole> {
+  const out = new Set<FieldRole>();
+  const walk = (f: FieldSpec) => {
+    out.add(roleOf(f));
+    for (const c of f.fields ?? []) walk(c);
+  };
+  for (const f of allFieldsFor(type)) walk(f);
+  return out;
+}
+
 function fieldOutline(type: ExperienceTypeSpec): string {
   const { layout } = resolveLayout(type);
   const render = (f: FieldSpec, depth: number): string => {
@@ -55,7 +69,8 @@ function fieldOutline(type: ExperienceTypeSpec): string {
     const opt = f.options ? ` 〔${f.options.join("·")}〕` : "";
     const req = f.required ? " (필수)" : "";
     const hint = f.hint ? `  ※ ${f.hint}` : "";
-    const head = `${pad}- ${f.key} | ${f.label} — ${f.kind}${opt}${req}${hint}`;
+    const role = ROLE_CONTRACTS[roleOf(f)].label;
+    const head = `${pad}- ${f.key} | ${f.label} — ${f.kind} [${role}]${opt}${req}${hint}`;
     const kids = (f.fields ?? []).map((c) => render(c, depth + 2)).join("\n");
     return kids ? `${head}\n${kids}` : head;
   };
@@ -89,6 +104,11 @@ export async function extract(
     "아래가 이 유형에서 채워야 할 전체 항목이다. 화면 배치 순서 그대로다.",
     "",
     fieldOutline(type),
+    "",
+    "── 칸의 역할별 계약 (각 항목 옆 [ ] 표시) ──",
+    "같은 문장이라도 역할이 맞는 칸에만 넣는다. 특히 한계·못 한 일·계획을 [성과·결과]에,",
+    "팀 전체가 한 일을 [내가 한 일]에 넣는 것이 가장 흔한 실수다.",
+    roleLegend(rolesIn(type)),
     "",
     `업로드된 파일명 목록: ${docs.map((d) => d.name).join(", ")}`,
   ].join("\n");

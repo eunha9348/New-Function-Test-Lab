@@ -87,7 +87,34 @@ class SourceIndex:
         return {"score": round(score, 3), "verdict": verdict, "where": where}
 
     # ── 값 검증 ─────────────────────────────────────────────────
-    def classify_number(self, raw: str) -> str:
+    # 파생값을 만들 수 있는 두 수치는 원문에서 이 거리(글자) 안에 함께 있어야 한다.
+    # 문서 전체의 아무 두 수로 계산을 허용하면 '2'와 '5'로 '150'이 만들어지는 식의 우연이 통과한다.
+    PAIR_WINDOW = 200
+
+    def number_pairs(self) -> List[Tuple[float, float]]:
+        """가까이 놓인 수치 쌍 (작은 값, 큰 값). 한 번 계산해 둔다."""
+        cached = getattr(self, "_pairs", None)
+        if cached is not None:
+            return cached
+        import re
+        from .normalize import normalize_number
+        found = []
+        for m in re.finditer(r"(\d[\d,]*(?:\.\d+)?)\s*([천만억조])?", self.raw):
+            try:
+                found.append((m.start(), float(normalize_number(m.group(1) + (m.group(2) or "")))))
+            except ValueError:
+                continue
+        pairs = set()
+        for i, (pa, a) in enumerate(found):
+            for pb, b in found[i + 1:]:
+                if pb - pa > self.PAIR_WINDOW:
+                    break
+                if a != b:
+                    pairs.add((min(a, b), max(a, b)))
+        self._pairs = sorted(pairs)
+        return self._pairs
+
+    def classify_number(self, raw: str, percent: Optional[bool] = None) -> str:
         """'원문 그대로' / '원문에서 계산됨' / '근거 없음' 을 가른다.
 
         '32.9%→55.7%' 가 원문에 있으면 '22.8%p 향상'은 환각이 아니라 **파생값**이다.
@@ -101,21 +128,20 @@ class SourceIndex:
             v = float(n)
         except ValueError:
             return "unknown"
-        nums: List[float] = []
-        for m in self.numbers:
-            try:
-                nums.append(float(m))
-            except ValueError:
-                continue
-        nums = sorted(set(nums))[:200]
         eps = max(0.05, abs(v) * 1e-6)
-        for i, a in enumerate(nums):
-            for b in nums[i + 1:]:
-                if (abs(abs(a - b) - v) < eps or abs(a + b - v) < eps
-                        or (b and abs(a / b * 100 - v) < 0.05)
-                        or (a and abs(b / a * 100 - v) < 0.05)
-                        or (a and abs((b - a) / a * 100 - v) < 0.05)):
-                    return "derived"
+        # 비율·증감률(×100)은 값이 퍼센트일 때만 계산해 본다. 아무 수에나 허용하면
+        # '6/24'의 24와 '2-1'의 2로 '1,200'이 만들어지는 식의 우연이 통과한다. (모르면 예전처럼 전부 허용)
+        ratio = percent is not False
+        for a, b in self.number_pairs():
+            if abs(abs(a - b) - v) < eps or abs(a + b - v) < eps:
+                return "derived"
+            if not ratio:
+                continue
+            if ((b and abs(a / b * 100 - v) < 0.05)
+                    or (a and abs(b / a * 100 - v) < 0.05)
+                    or (a and abs((b - a) / a * 100 - v) < 0.05)
+                    or (b and abs((b - a) / b * 100 - v) < 0.05)):
+                return "derived"
         return "unknown"
 
     def check_number(self, raw: str) -> bool:

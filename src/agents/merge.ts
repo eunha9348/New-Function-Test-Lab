@@ -31,8 +31,8 @@ function fieldScore(f: FieldSpec, value: unknown, prov: FieldValue[], idx: Sourc
   }
 
   const flat = JSON.stringify(value);
-  const nums = flat.match(/\d[\d,]*(?:\.\d+)?/g) ?? [];
-  const good = nums.filter((n) => idx.classifyNumber(n) !== "unknown").length;
+  const nums = [...flat.matchAll(/(\d[\d,]*(?:\.\d+)?)\s*(%p|%|％|퍼센트|포인트)?/g)];
+  const good = nums.filter((m) => idx.classifyNumber(m[1]!, { percent: !!m[2] }) !== "unknown").length;
   score += Math.min(0.8, 0.2 * good) - 1.2 * (nums.length - good); // 근거 없는 숫자는 강하게 감점
 
   if (f.kind === "repeater" && Array.isArray(value)) {

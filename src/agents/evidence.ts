@@ -2,6 +2,7 @@ import { PIPELINE } from "../config.js";
 import { SourceIndex, fold, ngrams } from "../ragkor/index.js";
 import type { ExtractedDoc, FieldValue } from "../types.js";
 import { getByPath, leafPaths } from "../util/path.js";
+import { globalOffset } from "../validate/locate.js";
 
 /**
  * 모델에 넘길 근거 묶음.
@@ -100,7 +101,14 @@ export function evidenceSpans(
     picked.push([Math.max(0, c - pad), Math.min(raw.length, c + needle.length + pad)]);
   };
 
-  for (const p of provenance) for (const q of p.quotes) mark(q.text);
+  for (const p of provenance) {
+    for (const q of p.quotes) {
+      // 정렬기가 원문 위치를 찾아 둔 인용은 그 자리를 그대로 쓴다 (n-gram 추정보다 정확하다)
+      const g = q.start !== undefined && q.end !== undefined ? globalOffset(docs, q.sourceId, q.start) : -1;
+      if (g >= 0) picked.push([Math.max(0, g - 260), Math.min(raw.length, g + (q.end! - q.start!) + 260)]);
+      else mark(q.text);
+    }
+  }
   for (const path of leafPaths(values).slice(0, 120)) {
     const v = getByPath(values, path);
     if (typeof v === "string" && v.length > 12) mark(v, 180);

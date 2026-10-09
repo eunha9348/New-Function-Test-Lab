@@ -133,7 +133,17 @@ export interface FieldValue {
   value: unknown;
   confidence: number;
   /** 원문에서 그대로 가져온 근거 문장 */
-  quotes: { sourceId: string; text: string }[];
+  quotes: Quote[];
+}
+
+/** 근거 인용. start/end는 정렬기가 찾은 원문 위치(해당 sourceId 문서 기준, end 미포함). */
+export interface Quote {
+  sourceId: string;
+  text: string;
+  start?: number;
+  end?: number;
+  /** 0~1. 정렬 일치도 (RapidFuzz partial_ratio 척도) */
+  alignScore?: number;
 }
 
 export interface ExtractionResult {
@@ -152,7 +162,9 @@ export type IssueType =
   | "summary_drift" // 요약이 원문 의미를 왜곡
   | "duplication" // 같은 내용 중복 배치
   | "missing_required" // 필수 누락
-  | "wrong_type"; // 유형 자체가 틀림
+  | "wrong_type" // 유형 자체가 틀림
+  | "context_mismatch" // 원문 문장은 진짜지만 맥락이 다른 칸 (한계 문장을 성과 칸에)
+  | "subject_drift"; // 팀이 한 일을 '내가 한 일'로
 
 export interface ReviewIssue {
   severity: "blocker" | "major" | "minor";
@@ -160,8 +172,8 @@ export interface ReviewIssue {
   path: string;
   detail: string;
   suggestedValue?: unknown;
-  /** 결정론적 검증기가 잡았는지, 감독 에이전트가 잡았는지 */
-  foundBy: "validator" | "supervisor";
+  /** 결정론적 검증기가 잡았는지, 감독 에이전트가 잡았는지, 최종 필드 감사관이 잡았는지 */
+  foundBy: "validator" | "supervisor" | "auditor";
 }
 
 export interface ReviewResult {
@@ -232,6 +244,8 @@ export interface OrganizeResult {
     history: ReviewResult[];
   };
   fallback: FallbackGuide;
+  /** 최종 필드 감사관의 칸별 판정 — 어느 칸이 확인됐고, 무엇을 고쳤고, 무엇이 남았는지 */
+  audit?: import("./agents/auditor.js").AuditReport;
   /** 원문에서 먼저 뽑아 둔 사실 시트 (수치·고유명사 누락 방지용) */
   factsheet?: unknown;
   ingest: {

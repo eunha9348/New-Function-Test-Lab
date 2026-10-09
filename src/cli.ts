@@ -93,6 +93,17 @@ function printSummary(r: OrganizeResult) {
     for (const i of notable.slice(0, 8)) console.log(`    · [${i.severity}] ${i.path} — ${i.detail}`);
   }
 
+  if (r.audit) {
+    const a = r.audit.summary;
+    console.log(`\n  필드 감사${r.audit.llm ? "" : " (기계 검증만)"}: 채워진 ${a.audited}칸 중 확인 ${a.ok} · 수정 ${a.fixed} · 확인 필요 ${a.flagged}`
+      + ` → 칸 정확도 ${a.fieldAccuracy}%`);
+    for (const f of r.audit.fields.filter((x) => ["fixed", "moved", "cleared", "filled"].includes(x.status)).slice(0, 6)) {
+      console.log(`    ✎ ${f.label} [${f.status}] ${f.notes.at(-1) ?? ""}`.slice(0, 160));
+    }
+    for (const f of r.audit.fields.filter((x) => x.status === "flagged").slice(0, 6)) {
+      console.log(`    ? ${f.label} — ${f.notes.at(-1) ?? ""}`.slice(0, 160));
+    }
+  }
   console.log(`\n  채움률 ${r.fallback.completeness}%`);
   if (r.fallback.confirmTypeWith) {
     console.log(`  ⚠ ${r.fallback.confirmTypeWith.question}`);

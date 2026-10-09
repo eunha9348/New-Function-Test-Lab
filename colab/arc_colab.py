@@ -205,6 +205,76 @@ def typo_variants(word: str, limit: int = 6) -> List[str]:
             break
     return uniq
 
+# ─────────────── ragkor/morph.py ───────────────
+"""형태소 분석 — Kiwi(kiwipiepy)를 붙이는 자리.
+
+RAGKOR의 조사·어미 떼기는 사람이 쓴 접미 목록(PARTICLES·ENDINGS)과 미리 만들어 둔
+굴절형 사전(`infl` 4,200건)으로 돌아갔다. 목록에 없는 활용형('줄였다', '붙여서')은
+원형으로 돌아오지 못했다. Kiwi는 활용형을 형태소로 쪼개 원형을 돌려준다.
+
+kiwipiepy가 없으면 기존 규칙으로 그대로 동작한다.
+TypeScript 쪽(`src/ragkor/morph.ts`)과 같은 원형 규칙을 쓴다.
+"""
+
+NOUNISH = {"NNG", "NNP", "NR", "XR", "SL", "SH", "SN", "XPN"}
+VERBISH = {"VV", "VA", "VX", "VCN"}
+
+_kiwi = None
+_cache: Dict[str, str] = {}
+
+
+def lemma_from_morphs(word: str, morphs) -> str:
+    """형태소 열 → 원형. 명사·어근 덩어리 > 첫 용언 어간 > 원래 어절."""
+    noun = []
+    for form, tag in morphs:
+        if tag in NOUNISH:
+            noun.append(form)
+        elif noun and not tag.startswith("XSN"):
+            break
+    if noun:
+        return "".join(noun).lower()
+    for form, tag in morphs:
+        base = tag.split("-")[0]
+        if base in VERBISH:
+            return form.lower()
+    return word.lower()
+
+
+def use_kiwi(enable: bool = True) -> bool:
+    """Kiwi를 켠다. 설치돼 있지 않으면 False를 돌려주고 규칙 기반을 유지한다."""
+    global _kiwi
+    if not enable:
+        _kiwi = None
+        _cache.clear()
+        return False
+    if _kiwi is not None:
+        return True
+    try:
+        from kiwipiepy import Kiwi
+    except ImportError:
+        return False
+    _kiwi = Kiwi(model_type="cong")
+    return True
+
+
+def kiwi_active() -> bool:
+    return _kiwi is not None
+
+
+def kiwi_lemma(word: str) -> Optional[str]:
+    if _kiwi is None:
+        return None
+    hit = _cache.get(word)
+    if hit is None:
+        try:
+            hit = lemma_from_morphs(word, [(t.form, t.tag) for t in _kiwi.tokenize(word)])
+        except Exception:
+            hit = word.lower()
+        if len(_cache) > 50_000:
+            _cache.clear()
+        _cache[word] = hit
+    return hit
+
 # ─────────────── ragkor/normalize.py ───────────────
 """표기 정규화 — 같은 말을 같은 모양으로 만든다.
 
@@ -212,6 +282,7 @@ def typo_variants(word: str, limit: int = 6) -> List[str]:
 말줄임표 하나, 표 파이프 하나, OCR이 끼워 넣은 페이지 머리말 하나로
 exact match가 실패한다. 여기서 그 노이즈를 전부 걷어낸다.
 """
+
 
 # ── 조사 — 길이 긴 것부터 벗겨야 '에서는'이 '에'로 잘못 잘리지 않는다 ──────
 PARTICLES = sorted([
@@ -304,8 +375,15 @@ def normalize_token(token: str) -> str:
     if re.fullmatch(r"\d[\d,.]*", t):
         return normalize_number(t)
     if re.fullmatch(r"[가-힣]+", t):
-        return stem(strip_particle(t))
+        # Kiwi가 켜져 있으면 형태소 분석으로 원형을 얻는다 — 접미 목록에 없는 활용형도 처리된다
+        k = kiwi_lemma(t)
+        return k if k is not None else rule_normalize(t)
     return t.rstrip(".")
+
+
+def rule_normalize(token: str) -> str:
+    """Kiwi 없이 쓰는 기존 규칙 — 조사 목록·어미 목록으로 떼어 낸다."""
+    return stem(strip_particle(token))
 
 
 _UNIT = {"천": 1_000, "만": 10_000, "억": 100_000_000, "조": 1_000_000_000_000}
@@ -770,6 +848,10 @@ def build(target: int = 10_000) -> dict:
 
 
 
+# 사람이 직접 쓴 표제어 규칙 — 생성 규칙(굴절·오타)보다 먼저 믿는다
+HUMAN_RULES = {"seed", "variant", "collo", "abbr", "affix-stem", "affix"}
+
+
 class Lexicon:
     """표면형 → 대표형 사전. 없으면 규칙으로 즉석 생성한다(Colab 단일파일 대비)."""
 
@@ -796,26 +878,71 @@ class Lexicon:
         return build()
 
     def canonical(self, token: str) -> str:
-        """표면형을 대표형으로. 사전에 없으면 정규화형을 그대로 돌려준다."""
-        t = normalize_token(token)
-        if t in self.canon:
-            return self.canon[t]
+        """표면형을 대표형으로. 사전에 없으면 정규화형을 그대로 돌려준다.
+
+        규칙 모드(기본)는 예전과 똑같다. Kiwi 모드는 TS `Lexicon.canonical` 과 같이
+        사람이 쓴 표제어를 먼저 보고, 결과를 대표형의 Kiwi 원형 색인으로 한 번 더 모은다.
+        """
         raw = token.strip().lower()
-        return self.canon.get(raw, t)
+        t = normalize_token(token)
+        if not kiwi_active():
+            if t in self.canon:
+                return self.canon[t]
+            return self.canon.get(raw, t)
+        if raw in self.canon and self.origin.get(raw) in HUMAN_RULES:
+            found = self.canon[raw]
+        elif t in self.canon:
+            found = self.canon[t]
+        elif raw in self.canon:
+            found = self.canon[raw]
+        elif re.fullmatch(r"[가-힣]+", raw) and rule_normalize(raw) in self.canon:
+            found = self.canon[rule_normalize(raw)]
+        else:
+            found = t
+        if re.fullmatch(r"[가-힣]+", found):
+            return self._lemma_index().get(kiwi_lemma(found), found)
+        return found
+
+    def _lemma_index(self) -> Dict[str, str]:
+        """대표형을 Kiwi 원형으로 다시 색인한다. 클러스터 머리말 → 사람이 쓴 표제어 → 나머지 순."""
+        idx = getattr(self, "_lemma_idx", None)
+        if idx is not None:
+            return idx
+        idx = {}
+
+        def put(surface: str, canonical: str) -> None:
+            if re.fullmatch(r"[가-힣]+", surface):
+                lem = kiwi_lemma(surface)
+                if lem and lem not in idx:
+                    idx[lem] = canonical
+
+        for c in self.clusters:
+            put(c["canon"], c["canon"])
+        for surface, canonical in self.canon.items():
+            if self.origin.get(surface) in HUMAN_RULES:
+                put(surface, canonical)
+        for c in dict.fromkeys(self.canon.values()):
+            put(c, c)
+        self._lemma_idx = idx
+        return idx
 
     def fuzzy_canonical(self, token: str, threshold: float = 0.86) -> Tuple[str, float]:
         """사전에 없는 오타를 자모 거리로 가장 가까운 표제어에 붙인다."""
         t = normalize_token(token)
         if t in self.canon:
             return self.canon[t], 1.0
+        raw = token.strip().lower()
+        # 오타가 섞인 말은 형태소 분석이 엉뚱하게 쪼갤 수 있다('포트폴리도'→'포트폴리') — 표면형으로도 재 본다
+        queries = list(dict.fromkeys(q for q in (t, raw, rule_normalize(raw) if re.fullmatch(r"[가-힣]+", raw) else raw) if q))
         best, score = t, 0.0
-        for L in (len(t) - 1, len(t), len(t) + 1):
-            for cand in self._by_len.get(L, ()):
-                s = similarity(t, cand)
-                if s > score:
-                    best, score = cand, s
-                    if s >= 0.99:
-                        break
+        for q in queries:
+            for L in (len(q) - 1, len(q), len(q) + 1):
+                for cand in self._by_len.get(L, ()):
+                    s = similarity(q, cand)
+                    if s > score:
+                        best, score = cand, s
+                        if s >= 0.99:
+                            break
         if score >= threshold:
             return self.canon.get(best, best), score
         return t, 0.0
@@ -966,7 +1093,33 @@ class SourceIndex:
         return {"score": round(score, 3), "verdict": verdict, "where": where}
 
     # ── 값 검증 ─────────────────────────────────────────────────
-    def classify_number(self, raw: str) -> str:
+    # 파생값을 만들 수 있는 두 수치는 원문에서 이 거리(글자) 안에 함께 있어야 한다.
+    # 문서 전체의 아무 두 수로 계산을 허용하면 '2'와 '5'로 '150'이 만들어지는 식의 우연이 통과한다.
+    PAIR_WINDOW = 200
+
+    def number_pairs(self) -> List[Tuple[float, float]]:
+        """가까이 놓인 수치 쌍 (작은 값, 큰 값). 한 번 계산해 둔다."""
+        cached = getattr(self, "_pairs", None)
+        if cached is not None:
+            return cached
+        import re
+        found = []
+        for m in re.finditer(r"(\d[\d,]*(?:\.\d+)?)\s*([천만억조])?", self.raw):
+            try:
+                found.append((m.start(), float(normalize_number(m.group(1) + (m.group(2) or "")))))
+            except ValueError:
+                continue
+        pairs = set()
+        for i, (pa, a) in enumerate(found):
+            for pb, b in found[i + 1:]:
+                if pb - pa > self.PAIR_WINDOW:
+                    break
+                if a != b:
+                    pairs.add((min(a, b), max(a, b)))
+        self._pairs = sorted(pairs)
+        return self._pairs
+
+    def classify_number(self, raw: str, percent: Optional[bool] = None) -> str:
         """'원문 그대로' / '원문에서 계산됨' / '근거 없음' 을 가른다.
 
         '32.9%→55.7%' 가 원문에 있으면 '22.8%p 향상'은 환각이 아니라 **파생값**이다.
@@ -979,21 +1132,20 @@ class SourceIndex:
             v = float(n)
         except ValueError:
             return "unknown"
-        nums: List[float] = []
-        for m in self.numbers:
-            try:
-                nums.append(float(m))
-            except ValueError:
-                continue
-        nums = sorted(set(nums))[:200]
         eps = max(0.05, abs(v) * 1e-6)
-        for i, a in enumerate(nums):
-            for b in nums[i + 1:]:
-                if (abs(abs(a - b) - v) < eps or abs(a + b - v) < eps
-                        or (b and abs(a / b * 100 - v) < 0.05)
-                        or (a and abs(b / a * 100 - v) < 0.05)
-                        or (a and abs((b - a) / a * 100 - v) < 0.05)):
-                    return "derived"
+        # 비율·증감률(×100)은 값이 퍼센트일 때만 계산해 본다. 아무 수에나 허용하면
+        # '6/24'의 24와 '2-1'의 2로 '1,200'이 만들어지는 식의 우연이 통과한다. (모르면 예전처럼 전부 허용)
+        ratio = percent is not False
+        for a, b in self.number_pairs():
+            if abs(abs(a - b) - v) < eps or abs(a + b - v) < eps:
+                return "derived"
+            if not ratio:
+                continue
+            if ((b and abs(a / b * 100 - v) < 0.05)
+                    or (a and abs(b / a * 100 - v) < 0.05)
+                    or (a and abs((b - a) / a * 100 - v) < 0.05)
+                    or (b and abs((b - a) / b * 100 - v) < 0.05)):
+                return "derived"
         return "unknown"
 
     def check_number(self, raw: str) -> bool:
@@ -1033,6 +1185,89 @@ class SourceIndex:
             if abs(len(src) - len(t)) <= 2 and similarity(t, src) >= fuzzy:
                 return True
         return False
+
+# ─────────────── ragkor/align.py ───────────────
+"""인용 정렬 — "이 인용이 원문의 몇 번째 글자부터 몇 번째 글자까지인가".
+
+RAGKOR의 quote_score()는 '있다/없다'만 말해 준다. 화면 하이라이트, 감독용 근거 구간,
+필드 감사관의 맥락 검사는 모두 원문 위치가 있어야 한다.
+
+RapidFuzz `fuzz.partial_ratio_alignment` 를 그대로 쓴다. 접은 글자열 위에서 정렬하고,
+접기 전 원문 좌표로 되돌린다. rapidfuzz가 없으면 같은 정의의 순수 파이썬 구현으로 대체한다.
+TypeScript 구현(`src/ragkor/align.ts`)과 같은 점수가 나오는지는
+`test/fixtures/align-rapidfuzz.json` 으로 검증한다.
+"""
+
+
+def fold_with_map(text: str) -> Tuple[str, List[int]]:
+    """글자·숫자만 남기고 소문자로 접는다. 각 글자가 원문 몇 번째 글자에서 왔는지 같이 돌려준다."""
+    chars: List[str] = []
+    mapping: List[int] = []
+    for i, ch in enumerate(text or ""):
+        for c in unicodedata.normalize("NFKC", ch).lower():
+            if c.isalnum():
+                chars.append(c)
+                mapping.append(i)
+    return "".join(chars), mapping
+
+
+def _lcs(a: str, b: str) -> int:
+    row = [0] * (len(b) + 1)
+    for ca in a:
+        prev = 0
+        for j in range(1, len(b) + 1):
+            tmp = row[j]
+            row[j] = prev + 1 if ca == b[j - 1] else max(row[j], row[j - 1])
+            prev = tmp
+    return row[len(b)]
+
+
+def _fallback_alignment(q: str, s: str) -> Tuple[float, int, int]:
+    """rapidfuzz가 없을 때 — 길이 m 창을 전부 밀어 보는 정의 그대로의 구현 (느리다)."""
+    m = len(q)
+    best = (-1.0, 0, min(m, len(s)))
+    for st in range(-m + 1, len(s)):
+        a, b = max(0, st), min(len(s), st + m)
+        if b <= a:
+            continue
+        w = s[a:b]
+        score = 2 * _lcs(w, q) / (m + len(w))
+        if score > best[0] + 1e-12:
+            best = (score, a, b)
+    return best
+
+
+def partial_ratio_alignment(q: str, s: str) -> Tuple[float, int, int]:
+    """접힌 인용 q 를 접힌 원문 s 위에 정렬한다. (점수 0~1, 시작, 끝) — 접힌 좌표."""
+    if not q or not s:
+        return 0.0, 0, 0
+    try:
+        from rapidfuzz import fuzz
+    except ImportError:
+        return _fallback_alignment(q, s)
+    if len(q) >= len(s):
+        return fuzz.ratio(q, s) / 100, 0, len(s)
+    r = fuzz.partial_ratio_alignment(q, s)
+    return r.score / 100, r.dest_start, r.dest_end
+
+
+def align_quote(quote: str, source: str) -> Optional[dict]:
+    """인용을 원문에 정렬해 원문 좌표로 돌려준다. 접힌 인용이 4글자 미만이면 None."""
+    fq, _ = fold_with_map(quote)
+    if len(fq) < 4:
+        return None
+    fs, mapping = fold_with_map(source)
+    if not fs:
+        return None
+    score, a, b = partial_ratio_alignment(fq, fs)
+    # 창 끝의 남는 글자는 잘라 낸다 — 하이라이트가 인용보다 넓어지지 않게
+    while a < b and fs[a] not in fq:
+        a += 1
+    while b > a and fs[b - 1] not in fq:
+        b -= 1
+    if b <= a:
+        return {"start": 0, "end": 0, "score": 0.0}
+    return {"start": mapping[a], "end": mapping[b - 1] + 1, "score": round(score, 3)}
 
 # <<<RAGKOR_EMBED_END>>>
 

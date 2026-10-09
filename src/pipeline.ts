@@ -6,7 +6,8 @@ import { buildFactsheet, factsheetText, type Factsheet } from "./agents/factshee
 import { buildFallbackGuide } from "./agents/guide.js";
 import { arbitrate, mergeDrafts } from "./agents/merge.js";
 import { supervise } from "./agents/supervisor.js";
-import { SourceIndex } from "./ragkor/index.js";
+import { auditFields } from "./agents/auditor.js";
+import { SourceIndex, loadKiwi } from "./ragkor/index.js";
 import { ingestFiles } from "./ingest/index.js";
 import { createSession, type LlmSession } from "./llm/index.js";
 import { CATEGORIES, EXPERIENCE_TYPES, TYPE_BY_ID, resolveLayout } from "./schema/index.js";
@@ -16,6 +17,9 @@ import type {
 } from "./types.js";
 import { checkGrounding } from "./validate/grounding.js";
 import { validateStructure } from "./validate/structural.js";
+import { locateQuotes } from "./validate/locate.js";
+import { checkContext } from "./validate/context.js";
+import { defaultEmbedder } from "./llm/embed.js";
 import { setByPath } from "./util/path.js";
 
 export interface OrganizeOptions {
@@ -53,6 +57,9 @@ export async function organizeExperience(
   const onProgress = options.onProgress;
   const session = options.session ?? (await createSession());
 
+  // Kiwi(WASM) 빌드는 수 초 걸린다 — 수집/OCR과 겹쳐서 시작해 둔다
+  const kiwiReady = PIPELINE.useKiwi ? loadKiwi({ quiet: true }).catch(() => null) : null;
+
   /* ── 0. 수집 / OCR ─────────────────────────────── */
   const docs = await ingestFiles(session, files, onProgress);
   if (docs.every((d) => !d.text.trim())) {
@@ -62,6 +69,10 @@ export async function organizeExperience(
     );
   }
 
+  // 맥락 검사용 임베딩 (Google 키가 없으면 단서어 규칙만으로 돈다)
+  const embedder = defaultEmbedder(session.usage);
+  const morph = await kiwiReady;
+  onProgress?.({ stage: "validate", message: morph ? "형태소 분석: Kiwi" : "형태소 분석: 규칙 기반 (Kiwi 모델 없음)" });
   const index = new SourceIndex(docs.map((d) => d.text));
   const quality = options.quality ?? "balanced";
   const heavyExtract = quality === "best";
@@ -167,8 +178,14 @@ export async function organizeExperience(
       feedback = undefined;
     }
 
-    onProgress?.({ stage: "validate", message: "형식·근거 기계 검증 (RAGKOR)" });
-    const validatorIssues = runValidators(type, draft, docs, index);
+    // 근거 인용마다 원문 위치를 붙인다 (LLM 호출 없음) — 감독 근거 구간·하이라이트·감사관이 쓴다
+    draft = { ...draft, provenance: locateQuotes(draft.provenance, docs) };
+
+    onProgress?.({ stage: "validate", message: "형식·근거·맥락 기계 검증 (RAGKOR)" });
+    const validatorIssues = [
+      ...runValidators(type, draft, docs, index),
+      ...(await checkContext(type, draft.values, draft.provenance, docs, { embedder })),
+    ];
 
     const spans = evidenceSpans(docs, draft.values, draft.provenance, index);
     onProgress?.({
@@ -246,11 +263,41 @@ export async function organizeExperience(
   if (!draft || !final) throw new Error("정리에 실패했습니다.");
 
   /* 패치 적용 후 형식 재검증 — 감독이 고치다 형식을 깨뜨렸을 수 있다 */
-  const postIssues = runValidators(type, draft, docs, index);
+  draft = { ...draft, provenance: locateQuotes(draft.provenance, docs) };
+  const revalidate = async (d: ExtractionResult) => [
+    ...runValidators(type, d, docs, index),
+    ...(await checkContext(type, d.values, d.provenance, docs, { embedder })),
+  ];
+  const postIssues = await revalidate(draft);
   final = {
     ...final,
     issues: mergeIssues(final.issues, postIssues),
   };
+
+  /* ── 3.5 최종 필드 감사관 — 칸 하나씩, LLM 1회, 루프 없음 ── */
+  const useAuditLlm = PIPELINE.auditor && quality !== "fast";
+  onProgress?.({
+    stage: "supervise",
+    message: useAuditLlm ? "최종 필드 감사 (칸별 대조)" : "최종 필드 감사 (기계 검증만)",
+  });
+  const audited = await auditFields(session, type, draft, docs, index, {
+    issues: final.issues,
+    evidenceText: evidenceSpans(docs, draft.values, draft.provenance, index, PIPELINE.supervisorEvidenceChars + 3000),
+    useLlm: useAuditLlm,
+    revalidate,
+  });
+  draft = audited.draft;
+  final = { ...final, issues: mergeIssues(
+    final.issues.filter((i) => i.foundBy === "supervisor"),
+    audited.issues,
+  ) };
+  onProgress?.({
+    stage: "supervise",
+    message: `필드 감사: ${audited.report.summary.audited}칸 중 확인 ${audited.report.summary.ok} · `
+      + `수정 ${audited.report.summary.fixed} · 확인 필요 ${audited.report.summary.flagged} `
+      + `(보류 ${audited.report.rejected.length})`,
+    detail: audited.report,
+  });
 
   /* ── 4. Fallback 안내 ──────────────────────────── */
   onProgress?.({ stage: "guide", message: "빈 항목 안내 생성" });
@@ -274,6 +321,7 @@ export async function organizeExperience(
     provenance: draft.provenance,
     review: { rounds, final, history },
     fallback,
+    audit: audited.report,
     factsheet,
     ingest: {
       docs: docs.map((d) => ({

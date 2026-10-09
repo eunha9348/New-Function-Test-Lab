@@ -13,7 +13,7 @@ START = "# <<<RAGKOR_EMBED_START>>>"
 END = "# <<<RAGKOR_EMBED_END>>>"
 
 # 순서가 중요하다 — 뒤 모듈이 앞 모듈을 쓴다
-MODULES = ["jamo", "normalize", "seed", "build_lexicon", "match", "ground"]
+MODULES = ["jamo", "morph", "normalize", "seed", "build_lexicon", "match", "ground", "align"]
 
 # 표준 라이브러리는 파일 상단에서 이미 import 했으므로 모듈별 import는 전부 걷어낸다.
 KEEP_IMPORT: set = set()

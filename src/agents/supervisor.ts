@@ -1,5 +1,6 @@
 
-import { EXPERIENCE_TYPES, allFieldsFor, labelForPath } from "../schema/index.js";
+import { EXPERIENCE_TYPES, ROLE_CONTRACTS, allFieldsFor, labelForPath, roleLegend, roleOf } from "../schema/index.js";
+import { rolesIn } from "./extractor.js";
 import type {
   ExperienceTypeSpec, ExtractedDoc, ExtractionResult, ReviewIssue, ReviewResult,
 } from "../types.js";
@@ -19,7 +20,8 @@ const SYSTEM = `당신은 ARC 경험 기록 서비스의 **3단계 감독(Superv
    patch로 해당 항목을 null 또는 근거 있는 값으로 고친다.
 3. **주어 왜곡** — 팀이 한 일을 '내 역할/기여'에 쓰지 않았는가. 원문이 뒷받침하는 만큼만 남긴다.
 4. **오배치(misplaced)** — 다른 항목에 들어가야 할 내용이 엉뚱한 칸에 있는가.
-   예: 회사 소개가 '내가 한 일'에, 팀 성과가 '핵심 성과'에.
+   예: 회사 소개가 '내가 한 일'에, 팀 성과가 '핵심 성과'에, 한계·계획이 '성과'에.
+   항목 옆 [ ] 표시가 그 칸의 역할이다. 아래 '역할별 계약'을 기준으로 판단한다.
 5. **요약 왜곡(summary_drift)** — 요약이 원문의 의미·강도·인과를 바꿨는가.
    "참여했다"를 "주도했다"로, "시도했다"를 "달성했다"로 바꾼 것은 왜곡이다.
 6. **중복(duplication)** — 같은 내용이 두 항목 이상에 들어갔는가. 한 곳만 남긴다.
@@ -105,7 +107,7 @@ export async function supervise(
   opts: { evidenceText?: string; factsheet?: string } = {},
 ): Promise<ReviewResult> {
   const fieldList = allFieldsFor(type)
-    .map((f) => `- ${f.key} | ${f.label} — ${f.kind}${f.options ? ` 〔${f.options.join("·")}〕` : ""}${f.required ? " (필수)" : ""}`)
+    .map((f) => `- ${f.key} | ${f.label} — ${f.kind} [${ROLE_CONTRACTS[roleOf(f)].label}]${f.options ? ` 〔${f.options.join("·")}〕` : ""}${f.required ? " (필수)" : ""}`)
     .join("\n");
 
   const systemStable = [
@@ -113,6 +115,9 @@ export async function supervise(
     "",
     `── 검수 대상 유형: ${type.emoji} ${type.label} (${type.id}) ──`,
     fieldList,
+    "",
+    "── 역할별 계약 ──",
+    roleLegend(rolesIn(type)),
   ].join("\n");
 
   const validatorReport = validatorIssues.length

@@ -5,6 +5,7 @@
  * 말줄임표 하나, 표 파이프 하나, OCR이 끼워 넣은 페이지 머리말 하나로
  * exact match가 실패한다. 여기서 그 노이즈를 전부 걷어낸다.
  */
+import { getMorph } from "./morph.js";
 
 /** 조사 — 길이 긴 것부터 벗겨야 '에서는'이 '에'로 잘못 잘리지 않는다 */
 export const PARTICLES = [
@@ -104,8 +105,17 @@ export function normalizeToken(token: string): string {
   const t = token.trim().toLowerCase();
   if (!t) return "";
   if (/^\d[\d,.]*$/.test(t)) return normalizeNumber(t);
-  if (/^[가-힣]+$/.test(t)) return stem(stripParticle(t));
+  if (/^[가-힣]+$/.test(t)) {
+    // Kiwi가 켜져 있으면 형태소 분석으로 원형을 얻는다 — 접미 목록에 없는 활용형도 처리된다
+    const morph = getMorph();
+    return morph ? morph.lemma(t) : ruleNormalize(t);
+  }
   return t.replace(/\.+$/, "");
+}
+
+/** Kiwi 없이 쓰는 기존 규칙 — 조사 목록·어미 목록으로 떼어 낸다 */
+export function ruleNormalize(token: string): string {
+  return stem(stripParticle(token));
 }
 
 /** 텍스트 안의 모든 수치를 정규화해서 모은다 (단위 표기 변형 포함). */

@@ -224,6 +224,71 @@ def run_number() -> dict:
             "판정": {n: idx.classify_number(n) for n, _ in cases}}
 
 
+def run_inflection() -> dict:
+    """활용형을 같은 원형으로 묶는 비율 — 기존 규칙 vs Kiwi.
+
+    평가쌍은 `test/fixtures/inflection-pairs.json` (TS 테스트와 공유).
+    Kiwi가 없으면 규칙 결과만 낸다.
+    """
+    import json
+    from pathlib import Path
+    from .morph import kiwi_active, kiwi_lemma, use_kiwi
+    from .normalize import normalize_token
+
+    fx = json.loads((Path(__file__).resolve().parent.parent / "test" / "fixtures"
+                     / "inflection-pairs.json").read_text(encoding="utf-8"))
+    pairs, distinct = fx["pairs"], fx["distinct"]
+
+    def score():
+        agree = [p for p in pairs if normalize_token(p[0]) == normalize_token(p[1])]
+        apart = sum(1 for a, b in distinct if normalize_token(a) != normalize_token(b))
+        miss = [f"{a}/{b}" for a, b in pairs if normalize_token(a) != normalize_token(b)]
+        return len(agree), apart, miss
+
+    was = kiwi_active()
+    use_kiwi(False)
+    rules = score()
+    out = {"쌍": len(pairs), "규칙": rules[0], "규칙 실패 예": rules[2][:4], "구분쌍": len(distinct),
+           "규칙 구분": rules[1], "kiwi": None}
+    if use_kiwi(True):
+        k = score()
+        lex = default_lexicon()
+        gen = {"infl", "affix+infl", "collo+infl", "typo"}
+        tot = hit = 0
+        for surf, rule in lex.origin.items():
+            if rule != "infl":
+                continue
+            tot += 1
+            canon, lem = lex.canon[surf], kiwi_lemma(surf)
+            if lem == canon or (lex.origin.get(lem) not in gen and lex.canon.get(lem) == canon):
+                hit += 1
+        out.update({"kiwi": k[0], "kiwi 구분": k[1], "kiwi 실패": k[2],
+                    "굴절 사전 재현": hit, "굴절 사전": tot})
+    use_kiwi(was)
+    return out
+
+
+def run_alignment() -> dict:
+    """인용 정렬 — 근거 있는 인용이 원래 문장 위치를 가리키는 비율 (RapidFuzz partial_ratio)."""
+    from .align import align_quote
+    cases = [c for c in build_eval() if c["truth"]]
+    hit = 0
+    for c in cases:
+        doc = DOCS[c["doc"]]
+        r = align_quote(c["quote"], doc)
+        if not r:
+            continue
+        seg = doc[r["start"]:r["end"]]
+        if fold(seg) and (fold(seg) in fold(doc)) and r["score"] >= 0.85:
+            hit += 1
+    try:
+        import rapidfuzz
+        engine = f"rapidfuzz {rapidfuzz.__version__}"
+    except ImportError:
+        engine = "순수 파이썬 대체 구현"
+    return {"케이스": len(cases), "정렬 성공": hit, "비율": round(hit / len(cases), 3), "엔진": engine}
+
+
 def main():
     lex = default_lexicon()
     print("=" * 70)
@@ -262,14 +327,29 @@ def main():
     kl = run_known_limits()
     print(f"  {kl['유형']}")
     print(f"    \"{kl['인용']}\" → {kl['판정']} ({kl['점수']}) · "
-          f"{'잡힘' if kl['잡히는가'] else '통과함 — 감독 에이전트가 잡아야 하는 몫'}")
+          f"{'잡힘' if kl['잡히는가'] else '표기 검증(RAGKOR)은 통과 — 맥락 검사 src/validate/context.ts 가 잡음'}")
 
     print("\n[5] 수치 근거 판정 (원문값 / 파생값 / 근거없음)")
     n = run_number()
     print(f"  {n['케이스']}건 중 {n['정확']}건 정확 → {n['정확도']:.3f}")
     print(f"  {n['판정']}")
+
+    print("\n[6] 활용형 정규화 (기존 규칙 vs Kiwi)")
+    inf = run_inflection()
+    print(f"  {inf['쌍']}쌍 중 같은 원형으로 묶음 — 규칙 {inf['규칙']}쌍"
+          + (f" → Kiwi {inf['kiwi']}쌍" if inf["kiwi"] is not None else " (Kiwi 미설치)"))
+    print(f"  다른 말 {inf['구분쌍']}쌍 구분 — 규칙 {inf['규칙 구분']}"
+          + (f" / Kiwi {inf['kiwi 구분']}" if inf["kiwi"] is not None else ""))
+    if inf["kiwi"] is not None:
+        print(f"  Kiwi 실패: {', '.join(inf['kiwi 실패']) or '없음'}")
+        print(f"  굴절 사전 {inf['굴절 사전']:,}건 중 {inf['굴절 사전 재현']:,}건을 사전 없이 재현 "
+              f"({inf['굴절 사전 재현'] / inf['굴절 사전']:.1%})")
+
+    print("\n[7] 인용 정렬 (원문 위치 찾기)")
+    al = run_alignment()
+    print(f"  근거 있는 인용 {al['케이스']}건 중 {al['정렬 성공']}건 정렬 → {al['비율']:.3f}  ({al['엔진']})")
     print()
-    return {"lexicon": lex.entries, "grounding": g, "typo": t, "synonym": sy,
+    return {"lexicon": lex.entries, "inflection": inf, "alignment": al, "grounding": g, "typo": t, "synonym": sy,
             "number": n, "known_limits": kl}
 
 

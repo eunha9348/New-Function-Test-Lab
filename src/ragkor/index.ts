@@ -13,4 +13,6 @@ export * from "./normalize.js";
 export * from "./lexicon.js";
 export * from "./match.js";
 export * from "./ground.js";
+export * from "./align.js";
+export * from "./morph.js";
 export { SEED_CLUSTERS, SPELLING_VARIANTS, NEOLOGISMS, ABBREVIATIONS, TYPO_SEEDS } from "./seed.js";

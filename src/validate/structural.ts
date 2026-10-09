@@ -42,6 +42,10 @@ export function validateStructure(
           }
           break;
         case "daterange": {
+          if (typeof v !== "object" || Array.isArray(v)) {
+            push("major", "format", path, `'${label}'은 {start, end} 형태의 기간이어야 합니다: ${JSON.stringify(v).slice(0, 60)}`);
+            break;
+          }
           const r = v as { start?: string | null; end?: string | null; ongoing?: boolean | null };
           for (const k of ["start", "end"] as const) {
             const dv = r?.[k];

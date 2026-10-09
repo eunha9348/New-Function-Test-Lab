@@ -76,9 +76,10 @@ export function checkGrounding(
     }
 
     // 3) 수치 — 원문값 / 파생값 / 근거없음
-    for (const raw of v.match(/\d[\d,]*(?:\.\d+)?/g) ?? []) {
+    for (const m of v.matchAll(/(\d[\d,]*(?:\.\d+)?)\s*(%p|%|％|퍼센트|포인트)?/g)) {
+      const raw = m[1]!;
       if (raw.replace(/,/g, "").length < 2) continue;
-      const kind = idx.classifyNumber(raw);
+      const kind = idx.classifyNumber(raw, { percent: !!m[2] });
       if (kind === "unknown") {
         add("major", path,
           `'${labelForPath(type, path)}'의 수치 "${raw}"가 원문에서 확인되지 않습니다. ` +

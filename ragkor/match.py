@@ -7,9 +7,14 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from .jamo import similarity
-from .normalize import fold, ngrams, normalize_token, numbers_in, sentences, tokenize
+from .morph import kiwi_active, kiwi_lemma
+from .normalize import fold, ngrams, normalize_token, numbers_in, rule_normalize, sentences, tokenize
 
 _LEX_PATH = Path(__file__).parent / "lexicon.json"
+
+
+# 사람이 직접 쓴 표제어 규칙 — 생성 규칙(굴절·오타)보다 먼저 믿는다
+HUMAN_RULES = {"seed", "variant", "collo", "abbr", "affix-stem", "affix"}
 
 
 class Lexicon:
@@ -41,26 +46,71 @@ class Lexicon:
         return build()
 
     def canonical(self, token: str) -> str:
-        """표면형을 대표형으로. 사전에 없으면 정규화형을 그대로 돌려준다."""
-        t = normalize_token(token)
-        if t in self.canon:
-            return self.canon[t]
+        """표면형을 대표형으로. 사전에 없으면 정규화형을 그대로 돌려준다.
+
+        규칙 모드(기본)는 예전과 똑같다. Kiwi 모드는 TS `Lexicon.canonical` 과 같이
+        사람이 쓴 표제어를 먼저 보고, 결과를 대표형의 Kiwi 원형 색인으로 한 번 더 모은다.
+        """
         raw = token.strip().lower()
-        return self.canon.get(raw, t)
+        t = normalize_token(token)
+        if not kiwi_active():
+            if t in self.canon:
+                return self.canon[t]
+            return self.canon.get(raw, t)
+        if raw in self.canon and self.origin.get(raw) in HUMAN_RULES:
+            found = self.canon[raw]
+        elif t in self.canon:
+            found = self.canon[t]
+        elif raw in self.canon:
+            found = self.canon[raw]
+        elif re.fullmatch(r"[가-힣]+", raw) and rule_normalize(raw) in self.canon:
+            found = self.canon[rule_normalize(raw)]
+        else:
+            found = t
+        if re.fullmatch(r"[가-힣]+", found):
+            return self._lemma_index().get(kiwi_lemma(found), found)
+        return found
+
+    def _lemma_index(self) -> Dict[str, str]:
+        """대표형을 Kiwi 원형으로 다시 색인한다. 클러스터 머리말 → 사람이 쓴 표제어 → 나머지 순."""
+        idx = getattr(self, "_lemma_idx", None)
+        if idx is not None:
+            return idx
+        idx = {}
+
+        def put(surface: str, canonical: str) -> None:
+            if re.fullmatch(r"[가-힣]+", surface):
+                lem = kiwi_lemma(surface)
+                if lem and lem not in idx:
+                    idx[lem] = canonical
+
+        for c in self.clusters:
+            put(c["canon"], c["canon"])
+        for surface, canonical in self.canon.items():
+            if self.origin.get(surface) in HUMAN_RULES:
+                put(surface, canonical)
+        for c in dict.fromkeys(self.canon.values()):
+            put(c, c)
+        self._lemma_idx = idx
+        return idx
 
     def fuzzy_canonical(self, token: str, threshold: float = 0.86) -> Tuple[str, float]:
         """사전에 없는 오타를 자모 거리로 가장 가까운 표제어에 붙인다."""
         t = normalize_token(token)
         if t in self.canon:
             return self.canon[t], 1.0
+        raw = token.strip().lower()
+        # 오타가 섞인 말은 형태소 분석이 엉뚱하게 쪼갤 수 있다('포트폴리도'→'포트폴리') — 표면형으로도 재 본다
+        queries = list(dict.fromkeys(q for q in (t, raw, rule_normalize(raw) if re.fullmatch(r"[가-힣]+", raw) else raw) if q))
         best, score = t, 0.0
-        for L in (len(t) - 1, len(t), len(t) + 1):
-            for cand in self._by_len.get(L, ()):
-                s = similarity(t, cand)
-                if s > score:
-                    best, score = cand, s
-                    if s >= 0.99:
-                        break
+        for q in queries:
+            for L in (len(q) - 1, len(q), len(q) + 1):
+                for cand in self._by_len.get(L, ()):
+                    s = similarity(q, cand)
+                    if s > score:
+                        best, score = cand, s
+                        if s >= 0.99:
+                            break
         if score >= threshold:
             return self.canon.get(best, best), score
         return t, 0.0

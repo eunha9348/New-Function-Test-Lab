@@ -14,10 +14,11 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "organize": "tsx src/cli.ts",
-    "test": "tsx test/schema.test.ts && tsx test/ragkor.test.ts",
+    "test": "tsx test/schema.test.ts && tsx test/ragkor.test.ts && tsx test/align.test.ts && tsx test/kiwi.test.ts && tsx test/auditor.test.ts",
     "serve": "tsx server/server.ts",
     "check": "tsx src/cli.ts --check",
-    "ragkor": "python3 -m ragkor.bench"
+    "ragkor": "python3 -m ragkor.bench",
+    "kiwi:model": "bash tools/fetch_kiwi_model.sh"
   },
   "optionalDependencies": {
     "sharp": "^0.34.0",
@@ -28,7 +29,8 @@
     "tesseract.js": "^5.1.1",
     "node-html-parser": "^6.1.13",
     "hwp.js": "^0.0.3",
-    "@anthropic-ai/sdk": "^0.125.0"
+    "@anthropic-ai/sdk": "^0.125.0",
+    "kiwi-nlp": "^0.24.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

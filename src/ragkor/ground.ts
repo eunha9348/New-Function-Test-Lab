@@ -120,28 +120,60 @@ export class SourceIndex {
   }
 
   /**
+   * 파생값을 만들 수 있는 두 수치는 원문에서 이 거리(글자) 안에 함께 있어야 한다.
+   * 문서 전체의 아무 두 수로 계산을 허용하면 '2'와 '5'로 '150%'가 만들어지는 식의 우연이 통과한다.
+   */
+  static readonly PAIR_WINDOW = 200;
+  private pairs: [number, number][] | null = null;
+
+  /** 가까이 놓인 수치 쌍 (작은 값, 큰 값). 한 번 계산해 둔다. */
+  numberPairs(): [number, number][] {
+    if (this.pairs) return this.pairs;
+    const found: [number, number][] = [];
+    const re = /(\d[\d,]*(?:\.\d+)?)\s*([천만억조])?/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(this.raw)) !== null) {
+      const v = Number(normalizeNumber(m[1]! + (m[2] ?? "")));
+      if (Number.isFinite(v)) found.push([m.index, v]);
+    }
+    const seen = new Set<string>();
+    const out: [number, number][] = [];
+    for (let i = 0; i < found.length; i++) {
+      for (let j = i + 1; j < found.length; j++) {
+        if (found[j]![0] - found[i]![0] > SourceIndex.PAIR_WINDOW) break;
+        const a = found[i]![1], b = found[j]![1];
+        if (a === b) continue;
+        const k = `${Math.min(a, b)}|${Math.max(a, b)}`;
+        if (!seen.has(k)) { seen.add(k); out.push([Math.min(a, b), Math.max(a, b)]); }
+      }
+    }
+    this.pairs = out.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+    return this.pairs;
+  }
+
+  /**
    * '원문 그대로' / '원문에서 계산됨' / '근거 없음' 을 가른다.
    *
    * '32.9%→55.7%' 가 원문에 있으면 '22.8%p 향상'은 환각이 아니라 **파생값**이다.
    * 이걸 구분하지 못하면 모델이 옳게 계산한 성과까지 환각으로 지워진다.
    */
-  classifyNumber(raw: string): NumberKind {
+  classifyNumber(raw: string, opts: { percent?: boolean } = {}): NumberKind {
     const n = normalizeNumber(raw);
     if (this.checkNumber(n)) return "literal";
     const v = Number(n);
     if (!Number.isFinite(v)) return "unknown";
     const eps = Math.max(0.05, Math.abs(v) * 1e-6);
-    const nums = this.numericValues;
-    for (let i = 0; i < nums.length; i++) {
-      const a = nums[i]!;
-      for (let j = i + 1; j < nums.length; j++) {
-        const b = nums[j]!;
-        if (Math.abs(Math.abs(a - b) - v) < eps || Math.abs(a + b - v) < eps
-          || (b !== 0 && Math.abs((a / b) * 100 - v) < 0.05)
-          || (a !== 0 && Math.abs((b / a) * 100 - v) < 0.05)
-          || (a !== 0 && Math.abs(((b - a) / a) * 100 - v) < 0.05)) {
-          return "derived";
-        }
+    // 비율·증감률(×100)은 값이 퍼센트일 때만 계산해 본다. 아무 수에나 허용하면
+    // '6/24'의 24와 '2-1'의 2로 '1,200'이 만들어지는 식의 우연이 통과한다. (모르면 예전처럼 전부 허용)
+    const ratio = opts.percent !== false;
+    for (const [a, b] of this.numberPairs()) {
+      if (Math.abs(Math.abs(a - b) - v) < eps || Math.abs(a + b - v) < eps) return "derived";
+      if (!ratio) continue;
+      if ((b !== 0 && Math.abs((a / b) * 100 - v) < 0.05)
+        || (a !== 0 && Math.abs((b / a) * 100 - v) < 0.05)
+        || (a !== 0 && Math.abs(((b - a) / a) * 100 - v) < 0.05)
+        || (b !== 0 && Math.abs(((b - a) / b) * 100 - v) < 0.05)) {
+        return "derived";
       }
     }
     return "unknown";

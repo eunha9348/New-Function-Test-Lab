@@ -110,6 +110,18 @@ export const PIPELINE = {
   ocrTileThresholdPx: 2200,
   /** 타일 겹침(px) */
   ocrTileOverlapPx: 160,
+  /**
+   * Kiwi 형태소 분석으로 조사·어미를 떼어 낸다 (모델: tools/fetch_kiwi_model.sh).
+   * 모델이 없으면 자동으로 기존 규칙을 쓴다.
+   */
+  useKiwi: true,
+  /**
+   * 최종 필드 감사관(sub-agent)을 돌린다. 결정론적 사전 감사 + LLM 1회.
+   * false면 결정론적 감사만 하고 LLM은 부르지 않는다.
+   */
+  auditor: true,
+  /** 감사관 패치는 이 정렬 일치도 이상인 근거가 있을 때만 적용한다 */
+  auditorPatchFloor: 0.85,
   /** 업로드 허용 최대 용량 (서버) */
   maxUploadBytes: 40 * 1024 * 1024,
 } as const;

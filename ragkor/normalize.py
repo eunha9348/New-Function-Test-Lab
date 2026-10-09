@@ -8,6 +8,8 @@ import re
 import unicodedata
 from typing import List, Set, Tuple
 
+from .morph import kiwi_lemma
+
 # ── 조사 — 길이 긴 것부터 벗겨야 '에서는'이 '에'로 잘못 잘리지 않는다 ──────
 PARTICLES = sorted([
     "이라고는", "이라고", "라고는", "이라는", "라는", "으로서", "으로써", "로서", "로써",
@@ -99,8 +101,15 @@ def normalize_token(token: str) -> str:
     if re.fullmatch(r"\d[\d,.]*", t):
         return normalize_number(t)
     if re.fullmatch(r"[가-힣]+", t):
-        return stem(strip_particle(t))
+        # Kiwi가 켜져 있으면 형태소 분석으로 원형을 얻는다 — 접미 목록에 없는 활용형도 처리된다
+        k = kiwi_lemma(t)
+        return k if k is not None else rule_normalize(t)
     return t.rstrip(".")
+
+
+def rule_normalize(token: str) -> str:
+    """Kiwi 없이 쓰는 기존 규칙 — 조사 목록·어미 목록으로 떼어 낸다."""
+    return stem(strip_particle(token))
 
 
 _UNIT = {"천": 1_000, "만": 10_000, "억": 100_000_000, "조": 1_000_000_000_000}

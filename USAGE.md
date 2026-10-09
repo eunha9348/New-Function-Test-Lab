@@ -38,8 +38,12 @@ google: process.env.GOOGLE_API_KEY ?? "AIza...여기에붙여넣기",
 
 ```bash
 npm install
+npm run kiwi:model     # (권장) Kiwi 형태소 분석 모델 받기 — 약 110MB, models/kiwi/
 npm run check          # 키가 유효한지, 어떤 모델이 선택됐는지 확인
 ```
+
+> Kiwi 모델이 없어도 동작합니다. 그때는 조사·어미를 기존 규칙으로 떼어 냅니다.
+> 다른 위치에 모델을 두었다면 `KIWI_MODEL_DIR=/경로` 로 알려 주세요.
 
 정상이면 이렇게 나옵니다.
 
@@ -332,9 +336,16 @@ apt install poppler-utils ffmpeg                          # 스캔 PDF / 영상
 - `PIPELINE.ensemble`은 배분 시도 횟수입니다. 값싼 모델 N회를 돌려 필드별로
   좋은 쪽만 합치므로, 늘려도 상위 모델 1회보다 쌉니다.
 - `PIPELINE.fieldConfidenceFloor`를 올리면 애매한 값을 더 적극적으로 비웁니다.
+- `PIPELINE.auditor`를 `false`로 두면 최종 필드 감사관의 LLM 호출을 끕니다(기계 사전 감사는 그대로).
+- `PIPELINE.auditorPatchFloor`(기본 0.85)는 감사관 수정을 받아들이는 근거 일치도입니다.
+  올리면 수정이 더 보수적으로 적용됩니다.
 
 ## 8. 비용 감각
 
 파일 하나(A4 3~5쪽 분량) 기준으로 대략 `$0.01 ~ $0.05` 입니다.
 이미지 OCR이 많거나 감독이 재작업을 돌면 올라갑니다.
 실제 사용량은 결과의 `meta.estimatedCostUsd`, 또는 `result.usage`에 단계별로 찍힙니다.
+
+최종 필드 감사관은 LLM을 1회 더 부릅니다. 3만 자 문서 기준 입력 약 1.4만 토큰·출력 약 5천 토큰
+(사고 토큰 포함 추정)으로, Gemini 3.8 Flash 도입가($0.75 / $3.75)에서 문서당 약 $0.03이 더 듭니다.
+맥락 검사용 임베딩(gemini-embedding-001)은 문서당 $0.001 미만입니다. 비용이 중요하면 `--quality fast`.
